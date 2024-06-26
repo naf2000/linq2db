@@ -125,6 +125,8 @@ namespace LinqToDB.Reflection
 								{
 									var local = Expression.Variable(next.Type);
 
+									var localType = info.member.GetCustomAttribute<SetterTypeAttribute>()?.Type ?? local.Type;
+
 									vars.Add(local);
 
 									exprs.Add(Expression.Assign(local, next));
@@ -132,7 +134,7 @@ namespace LinqToDB.Reflection
 										Expression.IfThen(
 											Expression.Equal(local, ExpressionInstances.UntypedNull),
 											Expression.Block(
-												Expression.Assign(local, Expression.New(local.Type)),
+												Expression.Assign(local, Expression.Convert(Expression.New(localType),local.Type)),
 												Expression.Assign(next, local))));
 
 									MakeSetter(local, i + 1);
