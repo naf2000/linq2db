@@ -278,6 +278,27 @@ namespace LinqToDB.Mapping
 				}
 			}
 
+			var cattrs = MappingSchema.GetAttributes<CompositeAssociationAttribute>(TypeAccessor.Type);
+			foreach (var cat in cattrs)
+			{
+				var meminfo = (cat.CurrentExpression as LambdaExpression)?.Body.GetMemberChainInfo()
+						?? throw new InvalidOperationException($"Empty {nameof(cat.CurrentExpression)} in {nameof(CompositeAssociationAttribute)} for {nameof(TypeAccessor.Type)}");
+				_associations.Add(new AssociationDescriptor(
+					TypeAccessor.Type,
+					meminfo,
+					cat.GetThisKeys(),
+					cat.GetOtherKeys(),
+					cat.ExpressionPredicate,
+					cat.Predicate,
+					cat.QueryExpressionMethod,
+					cat.QueryExpression,
+					cat.Storage,
+					cat.AssociationSetterExpressionMethod,
+					cat.AssociationSetterExpression,
+					cat.ConfiguredCanBeNull,
+					cat.AliasName));
+			}
+
 			var typeColumnAttrs = MappingSchema.GetAttributes<ColumnAttribute>(TypeAccessor.Type);
 
 			foreach (var attr in typeColumnAttrs)
