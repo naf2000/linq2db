@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Data;
 using System.Data.Common;
+using System.Globalization;
 using System.Linq;
 
 namespace LinqToDB.DataProvider.SapHana
@@ -10,6 +11,8 @@ namespace LinqToDB.DataProvider.SapHana
 	using Extensions;
 	using Mapping;
 	using SqlProvider;
+	using Translation;
+	using Linq.Translation;
 
 	public class SapHanaOdbcDataProvider : DynamicDataProviderBase<OdbcProviderAdapter>
 	{
@@ -21,11 +24,12 @@ namespace LinqToDB.DataProvider.SapHana
 			//when expression returns more than 1 row
 			//mark this as supported, it's better to throw exception
 			//then replace with left join, in which case returns incorrect data
-			SqlProviderFlags.IsSubQueryColumnSupported         = true;
-			SqlProviderFlags.IsDistinctOrderBySupported        = false;
-			SqlProviderFlags.IsSubQueryTakeSupported           = false;
+			SqlProviderFlags.IsCorrelatedSubQueryTakeSupported = false;
 			SqlProviderFlags.IsInsertOrUpdateSupported         = false;
-			SqlProviderFlags.AcceptsOuterExpressionInAggregate = false;
+			SqlProviderFlags.IsUpdateFromSupported             = false;
+			SqlProviderFlags.IsApplyJoinSupported              = true;
+			SqlProviderFlags.IsCrossApplyJoinSupportsCondition = true;
+			SqlProviderFlags.IsOuterApplyJoinSupportsCondition = true;
 
 			_sqlOptimizer = new SapHanaSqlOptimizer(SqlProviderFlags);
 		}
@@ -39,7 +43,7 @@ namespace LinqToDB.DataProvider.SapHana
 		{
 			if (commandType == CommandType.StoredProcedure)
 			{
-				commandText = $"{{ CALL {commandText} ({string.Join(",", (parameters ?? Array<DataParameter>.Empty).Select(x => "?"))}) }}";
+				commandText = $"{{ CALL {commandText} ({string.Join(",", (parameters ?? []).Select(x => "?"))}) }}";
 				commandType = CommandType.Text;
 			}
 
@@ -51,6 +55,11 @@ namespace LinqToDB.DataProvider.SapHana
 			TableOptions.IsGlobalTemporaryStructure |
 			TableOptions.IsLocalTemporaryStructure  |
 			TableOptions.IsLocalTemporaryData;
+
+		protected override IMemberTranslator CreateMemberTranslator()
+		{
+			return new SapHanaMemberTranslator();
+		}
 
 		public override ISqlBuilder CreateSqlBuilder(MappingSchema mappingSchema, DataOptions dataOptions)
 		{
@@ -94,7 +103,7 @@ namespace LinqToDB.DataProvider.SapHana
 						value = b ? (byte)1 : (byte)0;
 					break;
 				case DataType.Guid:
-					value          = value?.ToString();
+					value          = value == null ? null : string.Format(CultureInfo.InvariantCulture, "{0}", value);
 					dataType       = dataType.WithDataType(DataType.Char);
 					parameter.Size = 36;
 					break;

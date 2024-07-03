@@ -11,6 +11,7 @@ namespace LinqToDB.DataProvider.PostgreSQL
 	using Data;
 	using Mapping;
 	using SqlProvider;
+	using SqlQuery;
 
 	sealed class PostgreSQLBulkCopy : BasicBulkCopy
 	{
@@ -43,13 +44,11 @@ namespace LinqToDB.DataProvider.PostgreSQL
 			return MultipleRowsCopy1Async(table, options, source, cancellationToken);
 		}
 
-#if NATIVE_ASYNC
 		protected override Task<BulkCopyRowsCopied> MultipleRowsCopyAsync<T>(
 			ITable<T> table, DataOptions options, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
 			return MultipleRowsCopy1Async(table, options, source, cancellationToken);
 		}
-#endif
 
 		protected override BulkCopyRowsCopied ProviderSpecificCopy<T>(
 			ITable<T> table, DataOptions options, IEnumerable<T> source)
@@ -69,7 +68,6 @@ namespace LinqToDB.DataProvider.PostgreSQL
 			return MultipleRowsCopyAsync(table, options, source, cancellationToken);
 		}
 
-#if NATIVE_ASYNC
 		protected override Task<BulkCopyRowsCopied> ProviderSpecificCopyAsync<T>(
 			ITable<T> table, DataOptions options, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
@@ -78,7 +76,6 @@ namespace LinqToDB.DataProvider.PostgreSQL
 
 			return MultipleRowsCopyAsync(table, options, source, cancellationToken);
 		}
-#endif
 
 		BulkCopyRowsCopied ProviderSpecificCopyImpl<T>(
 			DataConnection dataConnection, ITable<T> table, DataOptions options, IEnumerable<T> source)
@@ -123,7 +120,7 @@ namespace LinqToDB.DataProvider.PostgreSQL
 				if (npgsqlType == null)
 				{
 					var sb = new System.Text.StringBuilder();
-					sqlBuilder.BuildTypeName(sb, new SqlQuery.SqlDataType(columnTypes[i]));
+					sqlBuilder.BuildTypeName(sb, columnTypes[i]);
 					npgsqlType = _provider.GetNativeType(sb.ToString(), true);
 				}
 
@@ -164,10 +161,9 @@ namespace LinqToDB.DataProvider.PostgreSQL
 					for (var i = 0; i < columns.Length; i++)
 					{
 						// DBNull.Value : https://github.com/npgsql/npgsql/issues/5330
-						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i]);
-						var dataType = columnTypes[i];
+						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i], npgsqlTypes[i]);
 
-						if (_provider.GetNativeType(dataType.DbType) == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ && value is DateTimeOffset dto)
+						if (value is DateTimeOffset dto && npgsqlTypes[i] == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ)
 						{
 							// https://github.com/npgsql/npgsql/issues/5332
 							// reset date
@@ -291,10 +287,9 @@ namespace LinqToDB.DataProvider.PostgreSQL
 					for (var i = 0; i < columns.Length; i++)
 					{
 						// DBNull.Value : https://github.com/npgsql/npgsql/issues/5330
-						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i]);
-						var dataType = columnTypes[i];
-
-						if (_provider.GetNativeType(dataType.DbType) == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ && value is DateTimeOffset dto)
+						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i], npgsqlTypes[i]);
+						
+						if (value is DateTimeOffset dto && npgsqlTypes[i] == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ)
 						{
 							// https://github.com/npgsql/npgsql/issues/5332
 							// reset date
@@ -363,7 +358,6 @@ namespace LinqToDB.DataProvider.PostgreSQL
 			return rowsCopied;
 		}
 
-#if NATIVE_ASYNC
 		async Task<BulkCopyRowsCopied> ProviderSpecificCopyImplAsync<T>(
 			DataConnection      dataConnection,
 			ITable<T>           table,
@@ -415,10 +409,9 @@ namespace LinqToDB.DataProvider.PostgreSQL
 					for (var i = 0; i < columns.Length; i++)
 					{
 						// DBNull.Value : https://github.com/npgsql/npgsql/issues/5330
-						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i]);
-						var dataType = columnTypes[i];
+						var value = _provider.NormalizeTimeStamp(pgOptions, columns[i].GetProviderValue(item!) ?? DBNull.Value, columnTypes[i], npgsqlTypes[i]);
 
-						if (_provider.GetNativeType(dataType.DbType) == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ && value is DateTimeOffset dto)
+						if (value is DateTimeOffset dto && npgsqlTypes[i] == NpgsqlProviderAdapter.NpgsqlDbType.TimeTZ)
 						{
 							// https://github.com/npgsql/npgsql/issues/5332
 							// reset date
@@ -486,6 +479,5 @@ namespace LinqToDB.DataProvider.PostgreSQL
 
 			return rowsCopied;
 		}
-#endif
 	}
 }

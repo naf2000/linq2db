@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Runtime.Serialization;
 
 namespace LinqToDB.SqlQuery
@@ -18,7 +19,7 @@ namespace LinqToDB.SqlQuery
 
 		[JetBrains.Annotations.StringFormatMethod("message")]
 		public SqlException(string message, params object?[] args)
-			: base(string.Format(message, args))
+			: base(string.Format(CultureInfo.InvariantCulture, message, args))
 		{
 		}
 
@@ -31,11 +32,5 @@ namespace LinqToDB.SqlQuery
 			: base(innerException.Message, innerException)
 		{
 		}
-
-		protected SqlException(SerializationInfo info, StreamingContext context)
-			: base(info, context)
-		{
-		}
 	}
 }
-

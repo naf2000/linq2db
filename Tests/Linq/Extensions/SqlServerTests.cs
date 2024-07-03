@@ -625,7 +625,7 @@ namespace Tests.Extensions
 
 			Assert.That(LastQuery, Contains.Substring("WITH (NoLock, NoWait)"));
 			Assert.That(LastQuery, Contains.Substring("WITH (HoldLock)"));
-			Assert.That(LastQuery, Contains.Substring("OPTION (FAST 10, RECOMPILE)"));
+			Assert.That(LastQuery, Contains.Substring("OPTION (RECOMPILE, FAST 10)"));
 		}
 
 		[Test]
@@ -858,7 +858,7 @@ namespace Tests.Extensions
 		}
 
 		[Test]
-		public void SqlServerUnionTest([IncludeDataSources(true, TestProvName.AllSqlServer2008Plus)] string context)
+		public void SqlServerUnionAllTest([IncludeDataSources(true, TestProvName.AllSqlServer2008Plus)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -867,7 +867,7 @@ namespace Tests.Extensions
 					from p in db.Parent
 					select p
 				)
-				.Union
+				.Concat
 				(
 					from p in db.Child
 					select p.Parent
@@ -879,11 +879,11 @@ namespace Tests.Extensions
 			_ = q.ToList();
 
 			Assert.That(LastQuery, Should.Contain(
-				"UNION",
+				"UNION ALL",
 				"OPTION (RECOMPILE)"));
 		}
 
-		public void SubQueryTest1([IncludeDataSources(true, TestProvName.AllSqlServer2016Plus)] string context)
+		private void SubQueryTest1([IncludeDataSources(true, TestProvName.AllSqlServer2016Plus)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -920,6 +920,32 @@ namespace Tests.Extensions
 				};
 
 			_ = q.ToList();
+		}
+
+		[ActiveIssue]
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/4321")]
+		public void TablesInScopeHintWithTReferenceTest(
+			[IncludeDataSources(true, TestProvName.AllSqlServer)] string context)
+		{
+			using var db = GetDataContext(context);
+
+			var q =
+			(
+				from c in db.Child
+				select new
+				{
+					c.ChildID,
+					c.Parent!.ParentID
+				}
+			)
+			.TablesInScopeHint(SqlServerHints.Table.NoLock);
+
+			_ = q.ToList();
+
+			var test = LastQuery?.Replace("\r", "");
+
+			Assert.That(test, Contains.Substring("[Child] [c_1] WITH (NoLock)"));
+			Assert.That(test, Contains.Substring("[Parent] [a_Parent] WITH (NoLock)"));
 		}
 	}
 }

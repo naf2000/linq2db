@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 
 using LinqToDB;
 
@@ -89,7 +90,7 @@ namespace Tests.Linq
 						Count2 = Child.Where(p => p.ParentID == id && p.ParentID == _testValue).Count(),
 					});
 
-				var rids   = db.Parent
+				var rids = db.Parent
 					.Where(p => ids.Contains(p.ParentID))
 					.Select(p => p.Value1 == null ? p.ParentID : p.ParentID + 1)
 					.Distinct();
@@ -184,12 +185,12 @@ namespace Tests.Linq
 
 				var chs2 = chilren.ToList();
 
-				Assert.AreEqual(chs2.Count, chs2.Except(chs1).Count());
+				Assert.That(chs2.Except(chs1).Count(), Is.EqualTo(chs2.Count));
 			}
 		}
 
 		[Test]
-		public void ObjectCompare([DataSources(ProviderName.Access)] string context)
+		public void ObjectCompare([DataSources(TestProvName.AllAccess)] string context)
 		{
 			using (var db = GetDataContext(context))
 				AreEqual(
@@ -236,7 +237,6 @@ namespace Tests.Linq
 		[Test]
 		public void Contains2([DataSources(
 			TestProvName.AllClickHouse,
-			TestProvName.AllInformix,
 			TestProvName.AllMySql,
 			TestProvName.AllSybase,
 			TestProvName.AllSapHana,
@@ -256,11 +256,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void SubSub1([DataSources(
-			TestProvName.AllClickHouse,
-			ProviderName.SqlCe, ProviderName.Access, ProviderName.DB2,
-			TestProvName.AllOracle)]
-			string context)
+		public void SubSub1([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 				AreEqual(
@@ -300,10 +296,8 @@ namespace Tests.Linq
 			TestProvName.AllClickHouse,
 			ProviderName.DB2,
 			TestProvName.AllOracle,
-			TestProvName.AllMySql,
 			TestProvName.AllSybase,
-			TestProvName.AllInformix,
-			TestProvName.AllSapHana)]
+			TestProvName.AllInformix)]
 			string context)
 		{
 			using (var db = GetDataContext(context))
@@ -347,55 +341,50 @@ namespace Tests.Linq
 		}
 
 		//[Test]
-		public void SubSub201([DataSources] string context)
-		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p1 in
-						from p2 in Parent
-						select new { p2, ID = p2.ParentID + 1 } into p3
-						where p3.ID > 0
-						select new { p2 = p3, ID = p3.ID + 1 }
-					where p1.ID > 0
-					select new
-					{
-						Count =
-						(
-							from c in p1.p2.p2.Children
-							select new { c, ID = c.ParentID + 1 } into c
-							where c.ID < p1.ID
-							select new { c.c, ID = c.c.ParentID + 1 } into c
-							where c.ID < p1.ID
-							select c
-						).FirstOrDefault()
-					},
-					from p1 in
-						from p2 in db.Parent
-						select new { p2, ID = p2.ParentID + 1 } into p3
-						where p3.ID > 0
-						select new { p2 = p3, ID = p3.ID + 1 }
-					where p1.ID > 0
-					select new
-					{
-						Count =
-						(
-							from c in p1.p2.p2.Children
-							select new { c, ID = c.ParentID + 1 } into c
-							where c.ID < p1.ID
-							select new { c.c, ID = c.c.ParentID + 1 } into c
-							where c.ID < p1.ID
-							select c
-						).FirstOrDefault()
-					});
-		}
+		//public void SubSub201([DataSources] string context)
+		//{
+		//	using (var db = GetDataContext(context))
+		//		AreEqual(
+		//			from p1 in
+		//				from p2 in Parent
+		//				select new { p2, ID = p2.ParentID + 1 } into p3
+		//				where p3.ID > 0
+		//				select new { p2 = p3, ID = p3.ID + 1 }
+		//			where p1.ID > 0
+		//			select new
+		//			{
+		//				Count =
+		//				(
+		//					from c in p1.p2.p2.Children
+		//					select new { c, ID = c.ParentID + 1 } into c
+		//					where c.ID < p1.ID
+		//					select new { c.c, ID = c.c.ParentID + 1 } into c
+		//					where c.ID < p1.ID
+		//					select c
+		//				).FirstOrDefault()
+		//			},
+		//			from p1 in
+		//				from p2 in db.Parent
+		//				select new { p2, ID = p2.ParentID + 1 } into p3
+		//				where p3.ID > 0
+		//				select new { p2 = p3, ID = p3.ID + 1 }
+		//			where p1.ID > 0
+		//			select new
+		//			{
+		//				Count =
+		//				(
+		//					from c in p1.p2.p2.Children
+		//					select new { c, ID = c.ParentID + 1 } into c
+		//					where c.ID < p1.ID
+		//					select new { c.c, ID = c.c.ParentID + 1 } into c
+		//					where c.ID < p1.ID
+		//					select c
+		//				).FirstOrDefault()
+		//			});
+		//}
 
 		[Test]
-		public void SubSub21([DataSources(
-			ProviderName.SqlCe, ProviderName.DB2,
-			TestProvName.AllClickHouse,
-			TestProvName.AllOracle,
-			ProviderName.Access)]
-			string context)
+		public void SubSub21([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 				AreEqual(
@@ -438,11 +427,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void SubSub211([DataSources(
-			ProviderName.SqlCe, ProviderName.Access, ProviderName.DB2,
-			TestProvName.AllClickHouse,
-			TestProvName.AllOracle)]
-			string context)
+		public void SubSub211([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 				AreEqual(
@@ -487,11 +472,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		public void SubSub212([DataSources(
-			ProviderName.SqlCe, TestProvName.AllAccess, ProviderName.DB2,
-			TestProvName.AllClickHouse,
-			TestProvName.AllOracle)]
-			string context)
+		public void SubSub212([DataSources(TestProvName.AllClickHouse)] string context)
 		{
 			using (var db = GetDataContext(context))
 				AreEqual(
@@ -657,14 +638,13 @@ namespace Tests.Linq
 					select p);
 		}
 
-
-		[Test, ActiveIssue(1601)]
+		[ActiveIssue(Configurations = [TestProvName.AllAccess, TestProvName.AllClickHouse, TestProvName.AllDB2, TestProvName.AllFirebird, TestProvName.AllInformix, TestProvName.AllOracle, TestProvName.AllSQLite, TestProvName.AllSybase, TestProvName.AllMariaDB, TestProvName.AllMySql57])]
+		[Test]
 		public void Issue1601([DataSources(false)] string context)
 		{
 			using (var db = GetDataConnection(context))
 			{
 				var query = from q in db.Types
-							let datePlus2 = q.DateTimeValue.AddDays(2)
 							let x = db.Types.Sum(y => y.MoneyValue)
 							select new
 							{
@@ -674,7 +654,7 @@ namespace Tests.Linq
 
 				query.ToList();
 
-				Assert.AreEqual(1, System.Text.RegularExpressions.Regex.Matches(db.LastQuery!, "Types").Count);
+				Assert.That(System.Text.RegularExpressions.Regex.Matches(db.LastQuery!, "Types"), Has.Count.EqualTo(2));
 			}
 		}
 
@@ -818,8 +798,8 @@ namespace Tests.Linq
 
 				var res = query.ToList();
 
-				Assert.AreEqual(1, res.Count);
-				Assert.AreEqual("Urupinsk", res[0].City_Name.Single().City_Name);
+				Assert.That(res, Has.Count.EqualTo(1));
+				Assert.That(res[0].City_Name.Single().City_Name, Is.EqualTo("Urupinsk"));
 			}
 		}
 
@@ -866,10 +846,134 @@ namespace Tests.Linq
 
 				var res = query.ToList();
 
-				Assert.AreEqual(1, res.Count);
-				Assert.AreEqual("Urupinsk", res[0].City_Name);
+				Assert.That(res, Has.Count.EqualTo(1));
+				Assert.That(res[0].City_Name, Is.EqualTo("Urupinsk"));
 			}
 		}
 
+		[Test]
+		public void DropOrderByFromNonLimitedSubquery([DataSources(TestProvName.AllClickHouse)] string context)
+		{
+			using var db = GetDataContext(context);
+
+			var query = db.Parent
+				.Where(p => db.Child.Where(c => c.ParentID == p.ParentID)
+					.Any(c => db.GrandChild.Select(gc => gc.ChildID).OrderBy(id => id).Contains(c.ChildID)));
+
+			AssertQuery(query);
+		}
+
+		#region Issue 1700
+		[ActiveIssue(Configurations = [TestProvName.AllDB2, TestProvName.AllInformix, TestProvName.AllOracle, ProviderName.SqlCe, TestProvName.AllSybase])]
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/1700")]
+		public void TestOuterApplySubFunction([DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+		{
+			var groupId = 5;
+
+			using var db = GetDataContext(context);
+			using var t1 = db.CreateLocalTable<Item>();
+			using var t2 = db.CreateLocalTable<ItemAppType>();
+			using var t3 = db.CreateLocalTable<AppType>();
+			using var t4 = db.CreateLocalTable<AppSubType>();
+
+			var items     = db.GetTable<Item>().AsQueryable();
+			var itemTypes = db.GetTable<ItemAppType>().AsQueryable();
+			var types     = db.GetTable<AppType>().AsQueryable();
+			var subTypes  = db.GetTable<AppSubType>().AsQueryable();
+
+			var data = (
+				from item in items.Where(i => i.GroupId == groupId)
+				let itemSubTypeDescription = SubFunction(itemTypes, types, subTypes, item)
+				select new { item.ItemId, Description1 = item.Description, Description2 = itemSubTypeDescription.Description });
+
+			var all_items = data.ToList();
+		}
+
+		[Table]
+		class ItemAppType
+		{
+			[Column] public int AppTypeId { get; set; }
+			[Column] public int ItemId  { get; set; }
+		}
+
+		[Table]
+		class Item
+		{
+			[Column] public int GroupId { get; set; }
+			[Column] public int ItemId  { get; set; }
+			[Column] public string? Description { get; set; }
+		}
+
+		[Table]
+		class AppType
+		{
+			[Column] public int AppTypeId { get; set; }
+			[Column] public DateTime CreatedDate { get; set; }
+		}
+
+		[Table]
+		class AppSubType
+		{
+			[Column] public int AppTypeId { get; set; }
+			[Column] public int AppSubTypeId { get; set; }
+			[Column] public string? Description { get; set; }
+			[Column] public DateTime CreatedDate { get; set; }
+		}
+
+		[ExpressionMethod(nameof(SubFunctionImpl))]
+		static TSome SubFunction(IQueryable<ItemAppType> itemTypes, IQueryable<AppType> types, IQueryable<AppSubType> subTypes, Item item)
+		{
+			throw new NotImplementedException();
+		}
+
+		public class TSome
+		{
+			public int      AppSubTypeId           { get; set; }
+			public string?  Description            { get; set; }
+			public DateTime MaxSubtypeCreatedDate  { get; set; }
+			public DateTime MaxTypeCreatedDate     { get; set; }
+			public int      MaxTypeId              { get; set; }
+			public int      CountDistinctTypeId    { get; set; }
+			public int      CountDistinctSubTypeId { get; set; }
+		}
+
+		static Expression<Func<IQueryable<ItemAppType>, IQueryable<AppType>, IQueryable<AppSubType>, Item, TSome?>> SubFunctionImpl()
+		{
+			return (itemTypes, types, subTypes, item) => (
+					from sub in
+						from itemtype in itemTypes
+						from type in types.LeftJoin(t => t.AppTypeId == itemtype.AppTypeId)
+						from subtype in subTypes.LeftJoin(u => u.AppTypeId == type.AppTypeId)
+						where itemtype.ItemId == item.ItemId
+							  && type.AppTypeId == itemtype.AppTypeId
+							  && subtype.AppTypeId == type.AppTypeId
+						select new
+						{
+							subtype.Description,
+							subtype.AppSubTypeId,
+							subtypeCreatedDate = subtype.CreatedDate,
+							typeCreatedDate    = type.CreatedDate,
+							type.AppTypeId
+						}
+					group sub by new { sub.Description, sub.AppSubTypeId }
+					into grpby
+					select new TSome
+					{
+						AppSubTypeId           = grpby.Key.AppSubTypeId,
+						Description            = grpby.Key.Description,
+						MaxSubtypeCreatedDate  = grpby.Max(i => i.subtypeCreatedDate),
+						MaxTypeCreatedDate     = grpby.Max(i => i.typeCreatedDate),
+						MaxTypeId              = grpby.Max(i => i.AppTypeId),
+						CountDistinctTypeId    = grpby.CountExt(i => i.AppTypeId, Sql.AggregateModifier.Distinct),
+						CountDistinctSubTypeId = grpby.CountExt(i => i.AppSubTypeId, Sql.AggregateModifier.Distinct)
+					}
+				)
+				.OrderByDescending(ord1 => ord1.CountDistinctTypeId)
+				.ThenByDescending(ord2 => ord2.MaxSubtypeCreatedDate)
+				.ThenByDescending(ord3 => ord3.MaxTypeCreatedDate)
+				.ThenByDescending(ord4 => ord4.MaxTypeId)
+				.FirstOrDefault();
+		}
+		#endregion
 	}
 }

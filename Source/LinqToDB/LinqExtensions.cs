@@ -5,7 +5,6 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-
 using JetBrains.Annotations;
 
 namespace LinqToDB
@@ -661,11 +660,13 @@ namespace LinqToDB
 		/// <typeparam name="T">Type of result.</typeparam>
 		/// <param name="dataContext">Database connection context.</param>
 		/// <param name="selector">Value selection expression.</param>
+		/// <param name="token">Optional asynchronous operation cancellation token.</param>
 		/// <returns>Requested value.</returns>
 		[Pure]
 		public static async Task<T> SelectAsync<T>(
 			                this IDataContext   dataContext,
-			[InstantHandle] Expression<Func<T>> selector)
+			[InstantHandle] Expression<Func<T>> selector,
+			                CancellationToken token = default)
 		{
 			if (dataContext == null) throw new ArgumentNullException(nameof(dataContext));
 			if (selector    == null) throw new ArgumentNullException(nameof(selector));
@@ -680,7 +681,7 @@ namespace LinqToDB
 				read = true;
 				item = r;
 				return false;
-			}).ConfigureAwait(Common.Configuration.ContinueOnCapturedContext);
+			}, token).ConfigureAwait(Common.Configuration.ContinueOnCapturedContext);
 
 			if (read)
 				return item;
@@ -1614,7 +1615,7 @@ namespace LinqToDB
 				Expression.Call(
 					null,
 					MethodHelper.GetMethodInfo(Into, dataContext, target),
-					Expression.Constant(null, typeof(IDataContext)), query.Expression));
+					SqlQueryRootExpression.Create(dataContext), query.Expression));
 
 			return new ValueInsertable<T>(q);
 		}
@@ -3024,8 +3025,6 @@ namespace LinqToDB
 					currentSource.Expression, Expression.Quote(count)));
 		}
 
-		static readonly MethodInfo _elementAtMethodInfo = MemberHelper.MethodOf(() => ElementAt<int>(null!,null!)).GetGenericMethodDefinition();
-
 		/// <summary>
 		/// Selects record at specified position from source query.
 		/// If query doesn't return enough records, <see cref="InvalidOperationException"/> will be thrown.
@@ -3048,7 +3047,7 @@ namespace LinqToDB
 			return currentSource.Provider.Execute<TSource>(
 				Expression.Call(
 					null,
-					_elementAtMethodInfo.MakeGenericMethod(typeof(TSource)),
+					Methods.LinqToDB.ElementAtLambda.MakeGenericMethod(typeof(TSource)),
 					currentSource.Expression, Expression.Quote(index)));
 		}
 
@@ -3076,7 +3075,7 @@ namespace LinqToDB
 			var expr =
 				Expression.Call(
 					null,
-					_elementAtMethodInfo.MakeGenericMethod(typeof(TSource)),
+					Methods.LinqToDB.ElementAtLambda.MakeGenericMethod(typeof(TSource)),
 					currentSource.Expression, Expression.Quote(index));
 
 			if (currentSource is IQueryProviderAsync query)
@@ -3361,7 +3360,6 @@ namespace LinqToDB
 					Expression.Quote(resultSelector)));
 		}
 
-
 		/// <summary>
 		/// Defines inner join between two sub-queries or tables.
 		/// </summary>
@@ -3629,7 +3627,7 @@ namespace LinqToDB
 					null,
 					MethodHelper.GetMethodInfo(AsQueryable, source, dataContext),
 					Expression.Constant(source),
-					ExpressionConstants.DataContextParam
+					SqlQueryRootExpression.Create(dataContext)
 				));
 
 			return query;
@@ -3982,7 +3980,6 @@ namespace LinqToDB
 					null,
 					MethodHelper.GetMethodInfo(SelectDistinct, source), currentSource.Expression));
 		}
-
 
 		#endregion;
 

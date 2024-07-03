@@ -2,17 +2,23 @@
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Authentication;
+
 using LinqToDB;
 using LinqToDB.Interceptors;
 using LinqToDB.Mapping;
 using LinqToDB.Remote;
 using LinqToDB.Remote.Grpc;
+
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+
 using NUnit.Framework;
+
 using ProtoBuf.Grpc.Server;
+
 using Tests.Model;
 using Tests.Model.Remote.Grpc;
 
@@ -33,6 +39,8 @@ namespace Tests.Remote.ServerContainer
 		{
 		}
 
+		private static string GetServiceUrl(int port) => $"https://localhost:{port}";
+
 		public ITestDataContext Prepare(
 			MappingSchema? ms,
 			IInterceptor? interceptor,
@@ -49,7 +57,7 @@ namespace Tests.Remote.ServerContainer
 				service.AddInterceptor(interceptor);
 			}
 
-			var url = $"https://localhost:{GetPort()}";
+			var url = GetServiceUrl(GetPort());
 
 			var dx = new TestGrpcDataContext(
 				url,
@@ -66,9 +74,6 @@ namespace Tests.Remote.ServerContainer
 
 			if (ms != null)
 				dx.MappingSchema = MappingSchema.CombineSchemas(ms, dx.MappingSchema);
-
-			if (configuration.IsAnyOf(TestProvName.AllMariaDB))
-				dx.MappingSchema = MappingSchema.CombineSchemas(TestBase._mariaDBSchema, dx.MappingSchema);
 
 			return dx;
 		}
@@ -111,7 +116,7 @@ namespace Tests.Remote.ServerContainer
 				{
 					webBuilder.UseStartup<Startup>();
 
-					var url = $"https://localhost:{port}";
+					var url = GetServiceUrl(port);
 					webBuilder.UseUrls(url);
 				}).Build();
 

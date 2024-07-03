@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -7,6 +8,7 @@ using LinqToDB.Reflection;
 
 namespace LinqToDB.Linq
 {
+	[DebuggerDisplay("Member: {MemberInfo.Name}")]
 	public class AccessorMember
 	{
 		public AccessorMember(MemberInfo memberInfo)

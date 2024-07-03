@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+
 using LinqToDB.DataModel;
 using LinqToDB.Metadata;
 using LinqToDB.Naming;
@@ -21,7 +24,7 @@ namespace LinqToDB.CommandLine
 		/// <summary>
 		/// Provides access to general scaffold options definitions.
 		/// </summary>
-		public static class General
+		internal static class General
 		{
 			/// <summary>
 			/// Import settings JSON option.
@@ -212,7 +215,7 @@ Example of platform-specific providers:
 
 If you choose T4, you can create initial empty template using 'dotnet linq2db template' command. It will generate initial template file with pre-generated extension points which you can modify to implement required customizations.
 Customization using compiled assembly has several requirements:
-- it should be compatible with current runtime, used by 'dotnet linq2db' tool (netcoreapp3.1 by default);
+- it should be compatible with current runtime, used by 'dotnet linq2db' tool;
 - assembly should contain exactly one interceptor class with customization logic. It should be inherited from {nameof(ScaffoldInterceptors)} and has default public constructor;
 - linq2db.Tools version should match tool's version to avoid possible compatibility issues/errors.",
 					null,
@@ -224,7 +227,7 @@ Customization using compiled assembly has several requirements:
 		/// <summary>
 		/// Provides access to code-generation scaffold options definitions.
 		/// </summary>
-		public static class CodeGen
+		internal static class CodeGen
 		{
 			/// <summary>
 			/// Nullable annotations generation option.
@@ -377,7 +380,7 @@ Customization using compiled assembly has several requirements:
 		/// <summary>
 		/// Provides access to data model scaffold options definitions.
 		/// </summary>
-		public static class DataModel
+		internal static class DataModel
 		{
 			/// <summary>
 			/// Naming option help text.
@@ -412,8 +415,23 @@ If you don't specify some property, CLI will use default value for current optio
 			/// <summary>
 			/// Naming option example template.
 			/// </summary>
-			private const string NAMING_EXAMPLE_TEMPLATE =
 #pragma warning disable JSON001 // Invalid JSON pattern
+#if SUPPORTS_COMPOSITE_FORMAT
+			private static readonly CompositeFormat NAMING_EXAMPLE_TEMPLATE = CompositeFormat.Parse(
+ @"
+{{
+  ""dataModel"":
+  {{
+    ""{0}"":
+    {{
+      ""case""         : ""pascal_case"",
+      ""pluralization"": ""singular"",
+      ""suffix""       : ""Record""
+    }}
+  }}
+}}");
+#else
+			private const string NAMING_EXAMPLE_TEMPLATE =
  @"
 {{
   ""dataModel"":
@@ -426,6 +444,7 @@ If you don't specify some property, CLI will use default value for current optio
     }}
   }}
 }}";
+#endif
 #pragma warning restore JSON001 // Invalid JSON pattern
 
 			/// <summary>
@@ -1060,15 +1079,6 @@ If you don't specify some property, CLI will use default value for current optio
 				_t4ModeOptions.DataModel.ProcedureResultColumnPropertyNameOptions);
 
 			/// <summary>
-			/// Table function <see cref="MethodInfo"/> field naming option.
-			/// </summary>
-			public static readonly CliOption TableFunctionMethodInfoNaming = DefineNamingOption(
-				"table-function-methodinfo-field-name",
-				"table function FieldInfo field naming options",
-				_defaultOptions.DataModel.TableFunctionMethodInfoFieldNameOptions,
-				_t4ModeOptions.DataModel.TableFunctionMethodInfoFieldNameOptions);
-
-			/// <summary>
 			/// Scalar function with tuple return type tuple mapping class naming option.
 			/// </summary>
 			public static readonly CliOption FunctionTupleClassNaming = DefineNamingOption(
@@ -1119,7 +1129,7 @@ If you don't specify some property, CLI will use default value for current optio
 					option,
 					help,
 					NAMING_HELP,
-					new[] { string.Format(NAMING_EXAMPLE_TEMPLATE, option) },
+					new[] { string.Format(CultureInfo.InvariantCulture, NAMING_EXAMPLE_TEMPLATE, option) },
 					defaults,
 					t4defaults);
 			}
@@ -1128,7 +1138,7 @@ If you don't specify some property, CLI will use default value for current optio
 		/// <summary>
 		/// Provides access to database schema scaffold options definitions.
 		/// </summary>
-		public static class SchemaOptions
+		internal static class SchemaOptions
 		{
 			/// <summary>
 			/// Schema objects to load option.
@@ -1363,7 +1373,7 @@ string // also you can put table name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"include-tables\": [ \"Users\", { \"name\": \"Roles\", \"schema\": \"dbo\" } ] } } // Users and dbo.Roles tables",
 						/*lang=json*/
-						"{ \"schema\": { \"include-tables\": [ { \"regex\": \"^audit_.$+\", \"schema\": \"dbo\" } ] } } // all tables starting from audit_ prefix"
+						"{ \"schema\": { \"include-tables\": [ { \"regex\": \"^audit_.+$\", \"schema\": \"dbo\" } ] } } // all tables starting from audit_ prefix"
 					});
 
 			/// <summary>
@@ -1400,7 +1410,7 @@ string // also you can put table name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-tables\": [ \"Users\", { \"name\": \"Roles\", \"schema\": \"dbo\" } ] } } // Users and dbo.Roles tables ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-tables\": [ { \"regex\": \"^audit_.$+\", \"schema\": \"dbo\" } ] } } // all tables starting from audit_ prefix ignored"
+						"{ \"schema\": { \"exclude-tables\": [ { \"regex\": \"^audit_.+$\", \"schema\": \"dbo\" } ] } } // all tables starting from audit_ prefix ignored"
 					});
 
 			/// <summary>
@@ -1437,7 +1447,7 @@ string // also you can put view name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"include-views\": [ \"Users\", { \"name\": \"Roles\", \"schema\": \"dbo\" } ] } } // Users and dbo.Roles views",
 						/*lang=json*/
-						"{ \"schema\": { \"include-views\": [ { \"regex\": \"^audit_.$+\", \"schema\": \"dbo\" } ] } } // all views starting from audit_ prefix"
+						"{ \"schema\": { \"include-views\": [ { \"regex\": \"^audit_.+$\", \"schema\": \"dbo\" } ] } } // all views starting from audit_ prefix"
 					});
 
 			/// <summary>
@@ -1474,7 +1484,7 @@ string // also you can put view name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-views\": [ \"Users\", { \"name\": \"Roles\", \"schema\": \"dbo\" } ] } } // Users and dbo.Roles views ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-views\": [ { \"regex\": \"^audit_.$+\", \"schema\": \"dbo\" } ] } } // all views starting from audit_ prefix ignored"
+						"{ \"schema\": { \"exclude-views\": [ { \"regex\": \"^audit_.+$\", \"schema\": \"dbo\" } ] } } // all views starting from audit_ prefix ignored"
 					});
 
 			/// <summary>
@@ -1511,7 +1521,7 @@ string // also you can put procedure name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"procedures-with-schema\": [ \"GetUsers\", { \"name\": \"LoadPermissions\", \"schema\": \"dbo\" } ] } } // GetUsers and dbo.LoadPermissions procedures",
 						/*lang=json*/
-						"{ \"schema\": { \"procedures-with-schema\": [ { \"regex\": \"^Load.$+\", \"schema\": \"dbo\" } ] } } // all procedures starting from Load prefix"
+						"{ \"schema\": { \"procedures-with-schema\": [ { \"regex\": \"^Load.+$\", \"schema\": \"dbo\" } ] } } // all procedures starting from Load prefix"
 					});
 
 			/// <summary>
@@ -1548,7 +1558,7 @@ string // also you can put procedure name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"procedures-without-schema\": [ \"DropAllTables\", { \"name\": \"FormatAllDrives\", \"schema\": \"dbo\" } ] } } // DropAllTables and dbo.FormatAllDrives procedures schema not loaded",
 						/*lang=json*/
-						"{ \"schema\": { \"procedures-without-schema\": [ { \"regex\": \"^Delete.$+\", \"schema\": \"dbo\" } ] } } // all procedures starting from Delete prefix"
+						"{ \"schema\": { \"procedures-without-schema\": [ { \"regex\": \"^Delete.+$\", \"schema\": \"dbo\" } ] } } // all procedures starting from Delete prefix"
 					});
 
 			/// <summary>
@@ -1585,7 +1595,7 @@ string // also you can put stored procedure name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"include-stored-procedures\": [ \"ActiveUsers\", { \"name\": \"InactiveUsers\", \"schema\": \"dbo\" } ] } } // ActiveUsers and dbo.InactiveUsers procedures",
 						/*lang=json*/
-						"{ \"schema\": { \"include-stored-procedures\": [ { \"regex\": \"^Query.$+\", \"schema\": \"dbo\" } ] } } // all stored procedures starting from Query prefix"
+						"{ \"schema\": { \"include-stored-procedures\": [ { \"regex\": \"^Query.+$\", \"schema\": \"dbo\" } ] } } // all stored procedures starting from Query prefix"
 					});
 
 			/// <summary>
@@ -1622,7 +1632,7 @@ string // also you can put stored procedure name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-stored-procedure\": [ \"TestProcedure\", { \"name\": \"CheckDb\", \"schema\": \"dbo\" } ] } } // TestProcedure and dbo.CheckDb procedures ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-stored-procedure\": [ { \"regex\": \"^Audit.$+\", \"schema\": \"dbo\" } ] } } // all stored procedures starting from Audit prefix ignored"
+						"{ \"schema\": { \"exclude-stored-procedure\": [ { \"regex\": \"^Audit.+$\", \"schema\": \"dbo\" } ] } } // all stored procedures starting from Audit prefix ignored"
 					});
 
 			/// <summary>
@@ -1659,7 +1669,7 @@ string // also you can put table function name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"include-table-functions\": [ \"ActiveUsers\", { \"name\": \"InactiveUsers\", \"schema\": \"dbo\" } ] } } // ActiveUsers and dbo.InactiveUsers functions",
 						/*lang=json*/
-						"{ \"schema\": { \"include-table-functions\": [ { \"regex\": \"^Query.$+\", \"schema\": \"dbo\" } ] } } // all table functions starting from Query prefix"
+						"{ \"schema\": { \"include-table-functions\": [ { \"regex\": \"^Query.+$\", \"schema\": \"dbo\" } ] } } // all table functions starting from Query prefix"
 					});
 
 			/// <summary>
@@ -1696,7 +1706,7 @@ string // also you can put table function name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-table-functions\": [ \"TestFunction\", { \"name\": \"CheckDb\", \"schema\": \"dbo\" } ] } } // TestFunction and dbo.CheckDb functions ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-table-functions\": [ { \"regex\": \"^Audit.$+\", \"schema\": \"dbo\" } ] } } // all table functions starting from Audit prefix ignored"
+						"{ \"schema\": { \"exclude-table-functions\": [ { \"regex\": \"^Audit.+$\", \"schema\": \"dbo\" } ] } } // all table functions starting from Audit prefix ignored"
 					});
 
 			/// <summary>
@@ -1733,7 +1743,7 @@ string // also you can put scalar function name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"include-scalar-functions\": [ \"ActiveUsers\", { \"name\": \"InactiveUsers\", \"schema\": \"dbo\" } ] } } // ActiveUsers and dbo.InactiveUsers functions",
 						/*lang=json*/
-						"{ \"schema\": { \"include-scalar-functions\": [ { \"regex\": \"^Query.$+\", \"schema\": \"dbo\" } ] } } // all scalar functions starting from Query prefix"
+						"{ \"schema\": { \"include-scalar-functions\": [ { \"regex\": \"^Query.+$\", \"schema\": \"dbo\" } ] } } // all scalar functions starting from Query prefix"
 					});
 
 			/// <summary>
@@ -1770,7 +1780,7 @@ string // also you can put scalar function name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-scalar-functions\": [ \"TestFunction\", { \"name\": \"CheckDb\", \"schema\": \"dbo\" } ] } } // TestFunction and dbo.CheckDb functions ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-scalar-functions\": [ { \"regex\": \"^Audit.$+\", \"schema\": \"dbo\" } ] } } // all scalar functions starting from Audit prefix ignored"
+						"{ \"schema\": { \"exclude-scalar-functions\": [ { \"regex\": \"^Audit.+$\", \"schema\": \"dbo\" } ] } } // all scalar functions starting from Audit prefix ignored"
 					});
 
 			/// <summary>
@@ -1807,7 +1817,7 @@ string // also you can put aggregateaggregate function name as string directly t
 						/*lang=json*/
 						"{ \"schema\": { \"include-aggregate-functions\": [ \"ActiveUsers\", { \"name\": \"InactiveUsers\", \"schema\": \"dbo\" } ] } } // ActiveUsers and dbo.InactiveUsers functions",
 						/*lang=json*/
-						"{ \"schema\": { \"include-aggregate-functions\": [ { \"regex\": \"^Query.$+\", \"schema\": \"dbo\" } ] } } // all aggregate functions starting from Query prefix"
+						"{ \"schema\": { \"include-aggregate-functions\": [ { \"regex\": \"^Query.+$\", \"schema\": \"dbo\" } ] } } // all aggregate functions starting from Query prefix"
 					});
 
 			/// <summary>
@@ -1844,7 +1854,7 @@ string // also you can put aggregate function name as string directly to list
 						/*lang=json*/
 						"{ \"schema\": { \"exclude-aggregate-functions\": [ \"TestFunction\", { \"name\": \"CheckDb\", \"schema\": \"dbo\" } ] } } // TestFunction and dbo.CheckDb functions ignored",
 						/*lang=json*/
-						"{ \"schema\": { \"exclude-aggregate-functions\": [ { \"regex\": \"^Audit.$+\", \"schema\": \"dbo\" } ] } } // all aggregate functions starting from Audit prefix ignored"
+						"{ \"schema\": { \"exclude-aggregate-functions\": [ { \"regex\": \"^Audit.+$\", \"schema\": \"dbo\" } ] } } // all aggregate functions starting from Audit prefix ignored"
 					});
 		}
 
