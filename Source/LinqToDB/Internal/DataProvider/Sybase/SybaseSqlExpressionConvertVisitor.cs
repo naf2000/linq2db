@@ -21,7 +21,7 @@ namespace LinqToDB.Internal.DataProvider.Sybase
 
 		#endregion
 
-		protected override IQueryElement VisitExistsPredicate(SqlPredicate.Exists predicate)
+		protected internal override IQueryElement VisitExistsPredicate(SqlPredicate.Exists predicate)
 		{
 			var result = base.VisitExistsPredicate(predicate);
 
@@ -105,9 +105,15 @@ namespace LinqToDB.Internal.DataProvider.Sybase
 
 				if (wrap && param.IsQueryParameter)
 				{
-					var paramValue = param.GetParameterValue(EvaluationContext.ParameterValues);
-
-					wrap = paramValue.ProviderValue == null;
+					if (!EvaluationContext.IsParametersInitialized)
+					{
+						wrap = false;
+					}
+					else
+					{
+						var paramValue = param.GetParameterValue(EvaluationContext.ParameterValues);
+						wrap = paramValue.ProviderValue == null;
+					}
 				}
 
 				if (wrap)

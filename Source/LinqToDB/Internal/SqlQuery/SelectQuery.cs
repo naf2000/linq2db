@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
+using LinqToDB.Internal.SqlQuery.Visitors;
+
 namespace LinqToDB.Internal.SqlQuery
 {
 	[DebuggerDisplay("SQL = {" + nameof(SqlText) + "}")]
@@ -79,6 +81,11 @@ namespace LinqToDB.Internal.SqlQuery
 		public bool             IsSimpleButWhere => !HasSetOperators && !Select.HasModifier && GroupBy.IsEmpty && Having.IsEmpty && OrderBy.IsEmpty && From.Tables.Count == 1 && From.Tables[0].Joins.Count == 0;
 		public bool             IsLimited        => Select.SkipValue != null || Select.TakeValue != null;
 		public bool             IsParameterDependent { get; set; }
+
+		public bool IsLimitedToOneRecord()
+		{
+			return Select.TakeValue is SqlValue { Value: 1 };
+		}
 
 		/// <summary>
 		/// Gets or sets flag when sub-query can be removed during optimization.
@@ -312,6 +319,9 @@ namespace LinqToDB.Internal.SqlQuery
 
 			return hash.ToHashCode();
 		}
+
+		[DebuggerStepThrough]
+		public override IQueryElement Accept(QueryElementVisitor visitor) => visitor.VisitSqlQuery(this);
 
 		#endregion
 

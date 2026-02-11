@@ -325,7 +325,6 @@ namespace LinqToDB.Internal.DataProvider.SqlServer
 		{
 			switch (type.DataType)
 			{
-				case DataType.Json      : StringBuilder.Append("JSON");             return;
 				case DataType.Guid      : StringBuilder.Append("UniqueIdentifier"); return;
 				case DataType.Variant   : StringBuilder.Append("Sql_Variant");      return;
 				case DataType.Money     : StringBuilder.Append("MONEY");            return;
@@ -534,25 +533,13 @@ namespace LinqToDB.Internal.DataProvider.SqlServer
 		protected override void BuildTypedExpression(DbDataType dataType, ISqlExpression value)
 		{
 			if (value is SqlValue { Value: decimal val })
-			{
-				var precision = DecimalHelper.GetPrecision(val);
-				var scale = DecimalHelper.GetScale(val);
-				if (precision == 0 && scale == 0)
-					precision = 1;
-				dataType = dataType.WithPrecision(precision).WithScale(scale);
-			}
+				dataType = CorrectDecimalFacets(dataType, val);
 			else if (value is SqlParameter param)
 			{
 				var paramValue = param.GetParameterValue(OptimizationContext.EvaluationContext.ParameterValues);
 
 				if (paramValue.ProviderValue is decimal decValue)
-				{
-					var precision = DecimalHelper.GetPrecision(decValue);
-					var scale = DecimalHelper.GetScale(decValue);
-					if (precision == 0 && scale == 0)
-						precision = 1;
-					dataType = dataType.WithPrecision(precision).WithScale(scale);
-				}
+					dataType = CorrectDecimalFacets(dataType, decValue);
 			}
 
 			base.BuildTypedExpression(dataType, value);

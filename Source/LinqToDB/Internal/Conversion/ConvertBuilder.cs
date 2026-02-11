@@ -118,17 +118,17 @@ namespace LinqToDB.Internal.Conversion
 
 			return type.TypeCode
 				is TypeCode.Boolean
-				or TypeCode.Byte    
-				or TypeCode.SByte   
-				or TypeCode.Int16   
-				or TypeCode.Int32   
-				or TypeCode.Int64   
-				or TypeCode.UInt16  
-				or TypeCode.UInt32  
-				or TypeCode.UInt64  
-				or TypeCode.Single  
-				or TypeCode.Double  
-				or TypeCode.Decimal 
+				or TypeCode.Byte
+				or TypeCode.SByte
+				or TypeCode.Int16
+				or TypeCode.Int32
+				or TypeCode.Int64
+				or TypeCode.UInt16
+				or TypeCode.UInt32
+				or TypeCode.UInt64
+				or TypeCode.Single
+				or TypeCode.Double
+				or TypeCode.Decimal
 				or TypeCode.Char;
 		}
 
@@ -245,8 +245,6 @@ namespace LinqToDB.Internal.Conversion
 			return null;
 		}
 
-		const FieldAttributes EnumField = FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal;
-
 		static object ThrowLinqToDBException(string text)
 		{
 			throw new LinqToDBConvertException(text);
@@ -258,10 +256,7 @@ namespace LinqToDB.Internal.Conversion
 		{
 			if (to.IsEnum)
 			{
-				var toFields = mappingSchema.GetMapValues(to);
-
-				if (toFields == null)
-					return null;
+				var toFields = mappingSchema.GetMapValues(to)!;
 
 				var fromType = from;
 
@@ -339,20 +334,11 @@ namespace LinqToDB.Internal.Conversion
 			return null;
 		}
 
-		sealed class EnumValues
-		{
-			public FieldInfo           Field = null!;
-			public MapValueAttribute[] Attrs = null!;
-		}
-
 		static Expression? GetFromEnum(Type from, Type to, Expression expression, MappingSchema mappingSchema)
 		{
 			if (from.IsEnum)
 			{
-				var fromFields = from.GetFields()
-					.Where (f => (f.Attributes & EnumField) == EnumField)
-					.Select(f => new EnumValues { Field = f, Attrs = mappingSchema.GetAttributes<MapValueAttribute>(from, f) })
-					.ToList();
+				var fromFields = mappingSchema.GetMapValues(from)!;
 
 				{
 					var valueType = to;
@@ -360,7 +346,7 @@ namespace LinqToDB.Internal.Conversion
 						valueType = valueType.UnwrapNullableType();
 
 					var toTypeFields = fromFields
-						.Select(f => new { f.Field, Attrs = f.Attrs
+						.Select(f => ( f.OrigValue, Attrs: f.MapValues
 							.OrderBy(a =>
 							{
 								var idx = a.Configuration == null ?
@@ -370,14 +356,14 @@ namespace LinqToDB.Internal.Conversion
 							})
 							.ThenBy(a => !a.IsDefault)
 							.ThenBy(a => a.Value == null)
-							.FirstOrDefault(a => a.Value == null || a.Value.GetType() == valueType) })
+							.FirstOrDefault(a => a.Value == null || a.Value.GetType() == valueType) ))
 						.ToList();
 
 					if (toTypeFields.All(f => f.Attrs != null))
 					{
 						var cases = toTypeFields.Select(f => Expression.SwitchCase(
 							Expression.Constant(f.Attrs!.Value ?? mappingSchema.GetDefaultValue(to), to),
-							Expression.Constant(Enum.Parse(from, f.Field.Name, false))));
+							Expression.Constant(f.OrigValue)));
 
 						var expr = Expression.Switch(
 							expression,
@@ -393,37 +379,34 @@ namespace LinqToDB.Internal.Conversion
 
 					if (toTypeFields.Any(f => f.Attrs != null))
 					{
-						var field = toTypeFields.First(f => f.Attrs == null);
+						(var origValue, _) = toTypeFields.First(f => f.Attrs == null);
 
 						return Expression.Convert(
 							Expression.Call(
 								_throwLinqToDBConvertException,
 								Expression.Constant(
-									$"Inconsistent mapping. '{from.FullName}.{field.Field.Name}' does not have MapValue(<{to.FullName}>) attribute.")),
+									$"Inconsistent mapping. '{from.FullName}.{origValue}' does not have MapValue(<{to.FullName}>) attribute.")),
 								to);
 					}
 				}
 
 				if (to.IsEnum)
 				{
-					var toFields = to.GetFields()
-						.Where (f => (f.Attributes & EnumField) == EnumField)
-						.Select(f => new EnumValues { Field = f, Attrs = mappingSchema.GetAttributes<MapValueAttribute>(to, f) })
-						.ToList();
+					var toFields = mappingSchema.GetMapValues(to)!;
 
-					var dic = new Dictionary<EnumValues,EnumValues>();
+					var dic = new Dictionary<MapValue,MapValue>();
 					var cl  = mappingSchema.ConfigurationList.Concat(new[] { "", null }).Select((c,i) => (c, i)).ToArray();
 
 					foreach (var toField in toFields)
 					{
-						if (toField.Attrs == null || toField.Attrs.Length == 0)
+						if (toField.MapValues.Length == 0)
 							return null;
 
-						var toAttr = toField.Attrs.First();
+						var toAttr = toField.MapValues[0];
 
-						toAttr = toField.Attrs.FirstOrDefault(a => a.Configuration == toAttr.Configuration && a.IsDefault) ?? toAttr;
+						toAttr = toField.MapValues.FirstOrDefault(a => a.Configuration == toAttr.Configuration && a.IsDefault) ?? toAttr;
 
-						var fromAttrs = fromFields.Where(f => f.Attrs.Any(a =>
+						var fromAttrs = fromFields.Where(f => f.MapValues.Any(a =>
 							a.Value?.Equals(toAttr.Value) ?? toAttr.Value == null)).ToList();
 
 						if (fromAttrs.Count == 0)
@@ -436,7 +419,7 @@ namespace LinqToDB.Internal.Conversion
 								select new
 								{
 									f,
-									a = f.Attrs.First(a => a.Value?.Equals(toAttr.Value) ?? toAttr.Value == null)
+									a = f.MapValues.First(a => a.Value?.Equals(toAttr.Value) ?? toAttr.Value == null)
 								} into fa
 								from c in cl
 								where fa.a.Configuration == c.c
@@ -447,7 +430,7 @@ namespace LinqToDB.Internal.Conversion
 						}
 
 						var prev = dic
-							.Where (a => a.Value.Field == fromAttrs[0].Field)
+							.Where (a => a.Value.OrigValue.Equals(fromAttrs[0].OrigValue))
 							.Select(pair => new { To = pair.Key, From = pair.Value })
 							.FirstOrDefault();
 
@@ -460,10 +443,10 @@ namespace LinqToDB.Internal.Conversion
 										string.Format(
 											CultureInfo.InvariantCulture,
 											"Mapping ambiguity. '{0}.{1}' can be mapped to either '{2}.{3}' or '{2}.{4}'.",
-											from.FullName, fromAttrs[0].Field.Name,
+											from.FullName, fromAttrs[0].OrigValue,
 											to.FullName,
-											prev.To.Field.Name,
-											toField.Field.Name))),
+											prev.To.OrigValue,
+											toField.OrigValue))),
 									to);
 						}
 
@@ -473,8 +456,8 @@ namespace LinqToDB.Internal.Conversion
 					if (dic.Count > 0)
 					{
 						var cases = dic.Select(f => Expression.SwitchCase(
-							Expression.Constant(Enum.Parse(to,   f.Key.  Field.Name, false)),
-							Expression.Constant(Enum.Parse(from, f.Value.Field.Name, false))));
+							Expression.Constant(f.Key.  OrigValue),
+							Expression.Constant(f.Value.OrigValue)));
 
 						var expr = Expression.Switch(
 							expression,
@@ -493,32 +476,34 @@ namespace LinqToDB.Internal.Conversion
 			return null;
 		}
 
-		static Tuple<Expression,bool>? GetConverter(MappingSchema mappingSchema, Expression expr, Type from, Type to)
+		record struct Conversion(Expression Expression, bool IsSchemaSpecific);
+
+		static Conversion? GetConverter(MappingSchema mappingSchema, Expression expr, Type from, Type to)
 		{
 			if (from == to)
-				return Tuple.Create(expr, false);
+				return new(expr, false);
 
 			var le = Converter.GetConverter(from, to);
 
 			if (le != null)
-				return Tuple.Create(le.GetBody(expr), false);
+				return new(le.GetBody(expr), false);
 
 			var lex = mappingSchema.TryGetConvertExpression(from, to);
 
 			if (lex != null)
-				return Tuple.Create(lex.GetBody(expr), true);
+				return new(lex.GetBody(expr), true);
 
 			var cex = mappingSchema.GetConvertExpression(from, to, false, false);
 
 			if (cex != null)
-				return Tuple.Create(cex.GetBody(expr), true);
+				return new(cex.GetBody(expr), true);
 
 			var ex =
 				GetFromEnum  (from, to, expr, mappingSchema) ??
 				GetToEnum    (from, to, expr, mappingSchema);
 
 			if (ex != null)
-				return Tuple.Create(ex, true);
+				return new(ex, true);
 
 			ex =
 				GetConversion       (from, to, expr) ??
@@ -531,16 +516,16 @@ namespace LinqToDB.Internal.Conversion
 				GetToString         (from, to, expr) ??
 				GetParseEnum        (from, to, expr);
 
-			return ex != null ? Tuple.Create(ex, false) : null;
+			return ex != null ? new(ex, false) : null;
 		}
 
-		static Tuple<Expression,bool>? ConvertUnderlying(
+		static Conversion? ConvertUnderlying(
 			MappingSchema mappingSchema,
 			Expression    expr,
 			Type from, Type ufrom,
 			Type to,   Type uto)
 		{
-			Tuple<Expression,bool>? ex = null;
+			Conversion? ex = null;
 
 			if (from != ufrom)
 			{
@@ -554,7 +539,7 @@ namespace LinqToDB.Internal.Conversion
 				ex = GetConverter(mappingSchema, expr, from, uto);
 
 				if (ex != null)
-					ex = Tuple.Create(Expression.Convert(ex.Item1, to) as Expression, ex.Item2);
+					ex = new(Expression.Convert(ex.Value.Expression, to), ex.Value.IsSchemaSpecific);
 			}
 
 			if (ex == null && from != ufrom && to != uto)
@@ -564,46 +549,47 @@ namespace LinqToDB.Internal.Conversion
 				ex = GetConverter(mappingSchema, cp, ufrom, uto);
 
 				if (ex != null)
-					ex = Tuple.Create(Expression.Convert(ex.Item1, to) as Expression, ex.Item2);
+					ex = new(Expression.Convert(ex.Value.Expression, to), ex.Value.IsSchemaSpecific);
 			}
 
 			return ex;
 		}
 
-		public static Tuple<LambdaExpression,LambdaExpression?,bool> GetConverter(MappingSchema? mappingSchema, Type from, Type to)
+		public static ConverterLambda GetConverter(MappingSchema? mappingSchema, Type from, Type to)
 		{
 			mappingSchema ??= MappingSchema.Default;
 
 			var p  = Expression.Parameter(from, "p");
-			var ne = null as LambdaExpression;
 
 			if (from == to)
-				return Tuple.Create(Expression.Lambda(p, p), ne, false);
+				return new(Expression.Lambda(p, p), null, false);
 
 			if (to == typeof(object))
-				return Tuple.Create(Expression.Lambda(Expression.Convert(p, typeof(object)), p), ne, false);
+				return new(Expression.Lambda(Expression.Convert(p, typeof(object)), p), null, false);
 
 			var ex =
 				GetConverter     (mappingSchema, p, from, to) ??
 				ConvertUnderlying(mappingSchema, p, from, from.UnwrapNullableType(), to, to.UnwrapNullableType()) ??
 				ConvertUnderlying(mappingSchema, p, from, from.ToUnderlying(),       to, to.ToUnderlying());
 
+			LambdaExpression? ne = null;
+
 			if (ex != null)
 			{
-				ne = Expression.Lambda(ex.Item1, p);
+				ne = Expression.Lambda(ex.Value.Expression, p);
 
 				if (from.IsNullableType)
-					ex = Tuple.Create(
-						Expression.Condition(ExpressionHelper.Property(p, nameof(Nullable<>.HasValue)), ex.Item1, new DefaultValueExpression(mappingSchema, to)) as Expression,
-						ex.Item2);
+					ex = new(
+						Expression.Condition(ExpressionHelper.Property(p, nameof(Nullable<>.HasValue)), ex.Value.Expression, new DefaultValueExpression(mappingSchema, to)),
+						ex.Value.IsSchemaSpecific);
 				else if (from.IsClass)
-					ex = Tuple.Create(
-						Expression.Condition(Expression.NotEqual(p, Expression.Constant(null, from)), ex.Item1, new DefaultValueExpression(mappingSchema, to)) as Expression,
-						ex.Item2);
+					ex = new(
+						Expression.Condition(Expression.NotEqual(p, Expression.Constant(null, from)), ex.Value.Expression, new DefaultValueExpression(mappingSchema, to)),
+						ex.Value.IsSchemaSpecific);
 			}
 
 			if (ex != null)
-				return Tuple.Create(Expression.Lambda(ex.Item1, p), ne, ex.Item2);
+				return new(Expression.Lambda(ex.Value.Expression, p), ne, ex.Value.IsSchemaSpecific);
 
 			if (to.IsNullableType)
 			{
@@ -618,7 +604,7 @@ namespace LinqToDB.Internal.Conversion
 
 				defex = GetCtor(uto, to, defex)!;
 
-				return Tuple.Create(Expression.Lambda(defex, p), ne, false);
+				return new(Expression.Lambda(defex, p), ne, false);
 			}
 			else
 			{
@@ -629,7 +615,7 @@ namespace LinqToDB.Internal.Conversion
 				if (defex.Type != to)
 					defex = Expression.Convert(defex, to);
 
-				return Tuple.Create(Expression.Lambda(defex, p), ne, false);
+				return new(Expression.Lambda(defex, p), ne, false);
 			}
 		}
 
@@ -647,43 +633,23 @@ namespace LinqToDB.Internal.Conversion
 			var allValuesHasSameType = true;
 			var hasNullValue         = false;
 
-			foreach (var field in type.GetFields())
+			var enumMappings = mappingSchema.GetMapValues(type)!;
+
+			foreach (var values in enumMappings)
 			{
-				if ((field.Attributes & EnumField) == EnumField)
+				if (values.MapValues.Length == 0)
+					allFieldsMapped = false;
+				else
 				{
-					var attrs = mappingSchema.GetAttributes<MapValueAttribute>(type, field);
+					// we don't just take first attribute to not break previous implementation
+					// which prefered IsDefault=true value if many values specified
+					var isDefault = false;
 
-					if (attrs.Length == 0)
-						allFieldsMapped = false;
-					else
+					// look for default value
+					foreach (var attr in values.MapValues)
 					{
-						// we don't just take first attribute to not break previous implementation
-						// which prefered IsDefault=true value if many values specified
-						var isDefault = false;
-
-						// look for default value
-						foreach (var attr in attrs)
+						if (attr.IsDefault)
 						{
-							if (attr.IsDefault)
-							{
-								if (attr.Value != null)
-								{
-									if (valuesType == null)
-										valuesType = attr.Value.GetType();
-									else if (valuesType != attr.Value.GetType())
-										allValuesHasSameType = false;
-								}
-								else
-									hasNullValue = true;
-
-								isDefault = true;
-								break;
-							}
-						}
-
-						if (!isDefault)
-						{
-							var attr = attrs[0];
 							if (attr.Value != null)
 							{
 								if (valuesType == null)
@@ -693,7 +659,24 @@ namespace LinqToDB.Internal.Conversion
 							}
 							else
 								hasNullValue = true;
+
+							isDefault = true;
+							break;
 						}
+					}
+
+					if (!isDefault)
+					{
+						var attr = values.MapValues[0];
+						if (attr.Value != null)
+						{
+							if (valuesType == null)
+								valuesType = attr.Value.GetType();
+							else if (valuesType != attr.Value.GetType())
+								allValuesHasSameType = false;
+						}
+						else
+							hasNullValue = true;
 					}
 				}
 			}

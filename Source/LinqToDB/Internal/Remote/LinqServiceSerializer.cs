@@ -692,34 +692,34 @@ namespace LinqToDB.Internal.Remote
 					return expression;
 				}
 
-				protected override IQueryElement VisitSqlTable(SqlTable element)
+				protected internal override IQueryElement VisitSqlTable(SqlTable element)
 				{
 					RegisterInSerializer(element.All);
 					VisitElements(element.Fields, VisitMode.ReadOnly);
 					return base.VisitSqlTable(element);
 				}
 
-				protected override IQueryElement VisitSqlCteTable(SqlCteTable element)
+				protected internal override IQueryElement VisitSqlCteTable(SqlCteTable element)
 				{
 					RegisterInSerializer(element.All);
 					VisitElements(element.Fields, VisitMode.ReadOnly);
 					return base.VisitSqlCteTable(element);
 				}
 
-				protected override IQueryElement VisitSqlRawSqlTable(SqlRawSqlTable element)
+				protected internal override IQueryElement VisitSqlRawSqlTable(SqlRawSqlTable element)
 				{
 					RegisterInSerializer(element.All);
 					VisitElements(element.Fields, VisitMode.ReadOnly);
 					return base.VisitSqlRawSqlTable(element);
 				}
 
-				protected override IQueryElement VisitSqlTableLikeSource(SqlTableLikeSource element)
+				protected internal override IQueryElement VisitSqlTableLikeSource(SqlTableLikeSource element)
 				{
 					VisitElements(element.SourceFields, VisitMode.ReadOnly);
 					return base.VisitSqlTableLikeSource(element);
 				}
 
-				protected override IQueryElement VisitSqlValuesTable(SqlValuesTable element)
+				protected internal override IQueryElement VisitSqlValuesTable(SqlValuesTable element)
 				{
 					VisitElements(element.Fields, VisitMode.ReadOnly);
 					VisitListOfLists(element.Rows, VisitMode.ReadOnly);
@@ -846,6 +846,7 @@ namespace LinqToDB.Internal.Remote
 					case QueryElementType.SqlNullabilityExpression : GetType(((SqlNullabilityExpression)e).SystemType)          ; break;
 					case QueryElementType.SqlAnchor                : GetType(((SqlAnchor)e).SystemType)                         ; break;
 					case QueryElementType.SqlBinaryExpression      : GetType(((SqlBinaryExpression)     e).SystemType)          ; break;
+					case QueryElementType.SqlUnaryExpression       : GetType(((SqlUnaryExpression)      e).SystemType)          ; break;
 					case QueryElementType.SqlDataType              : GetType(((SqlDataType)             e).Type.SystemType)     ; break;
 					case QueryElementType.SqlValue                 : GetType(((SqlValue)                e).ValueType.SystemType); break;
 					case QueryElementType.SqlTable                 : GetType(((SqlTable)                e).ObjectType)          ; break;
@@ -976,6 +977,18 @@ namespace LinqToDB.Internal.Remote
 							Append(elem.Expr1);
 							Append(elem.Operation);
 							Append(elem.Expr2);
+							Append(elem.Precedence);
+
+							break;
+						}
+
+					case QueryElementType.SqlUnaryExpression :
+						{
+							var elem = (SqlUnaryExpression)e;
+
+							Append(elem.SystemType);
+							Append(elem.Expr);
+							Append((int)elem.Operation);
 							Append(elem.Precedence);
 
 							break;
@@ -1334,6 +1347,7 @@ namespace LinqToDB.Internal.Remote
 							Append(elem.SkipValue);
 							Append(elem.TakeValue);
 							Append((int?)elem.TakeHints);
+							Append(elem.OptimizeDistinct);
 
 							Append(elem.Columns);
 
@@ -2031,6 +2045,18 @@ namespace LinqToDB.Internal.Remote
 							break;
 						}
 
+					case QueryElementType.SqlUnaryExpression:
+					{
+						var systemType = ReadType()!;
+						var expr       = Read<ISqlExpression>()!;
+						var operation  = (SqlUnaryOperation)ReadInt()!;
+						var precedence = ReadInt();
+
+						obj = new SqlUnaryExpression(systemType, expr, operation, precedence);
+
+						break;
+					}
+
 					case QueryElementType.SqlValue :
 						{
 							var dbDataType    = ReadDbDataType();
@@ -2397,13 +2423,17 @@ namespace LinqToDB.Internal.Remote
 
 					case QueryElementType.SelectClause :
 						{
-							var isDistinct = ReadBool();
-							var skipValue  = Read<ISqlExpression>()!;
-							var takeValue  = Read<ISqlExpression>()!;
-							var takeHints  = (TakeHints?)ReadNullableInt();
-							var columns    = ReadArray<SqlColumn>()!;
+							var isDistinct       = ReadBool();
+							var skipValue        = Read<ISqlExpression>()!;
+							var takeValue        = Read<ISqlExpression>()!;
+							var takeHints        = (TakeHints?)ReadNullableInt();
+							var optimizeDistinct = ReadBool();
+							var columns          = ReadArray<SqlColumn>()!;
 
-							obj = new SqlSelectClause(isDistinct, takeValue, takeHints, skipValue, columns);
+							obj = new SqlSelectClause(isDistinct, takeValue, takeHints, skipValue, columns)
+							{
+								OptimizeDistinct = optimizeDistinct
+							};
 
 							break;
 						}

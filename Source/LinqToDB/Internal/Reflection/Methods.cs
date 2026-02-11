@@ -32,9 +32,14 @@ namespace LinqToDB.Internal.Reflection
 
 		public static class System
 		{
-			public static readonly MethodInfo Guid_NewGuid     = MemberHelper.MethodOf(     () => Guid.NewGuid());
-			public static readonly MethodInfo Guid_ToString    = MemberHelper.MethodOf<Guid>(g => g.ToString());
-			public static readonly MethodInfo Guid_ToByteArray = MemberHelper.MethodOf<Guid>(g => g.ToByteArray());
+#pragma warning disable MA0107
+			public static readonly MethodInfo Object_ToString      = MemberHelper.MethodOf<object>(o => o.ToString());
+#pragma warning restore MA0107
+			public static readonly MethodInfo Guid_NewGuid         = MemberHelper.MethodOf(     () => Guid.NewGuid());
+			public static readonly MethodInfo Guid_ToString        = MemberHelper.MethodOf<Guid>(g => g.ToString());
+			public static readonly MethodInfo Guid_ToByteArray     = MemberHelper.MethodOf<Guid>(g => g.ToByteArray());
+			public static readonly MethodInfo String_ObjectsConcat = MemberHelper.MethodOf(() => string.Concat((object?)null, (object?)null));
+
 		}
 
 		public static class Enumerable
@@ -390,6 +395,9 @@ namespace LinqToDB.Internal.Reflection
 			{
 				public static readonly PropertyInfo DbDataType = MemberHelper.PropertyOf<Data.DataParameter>(dp => dp.DbDataType);
 				public static readonly PropertyInfo Value      = MemberHelper.PropertyOf<Data.DataParameter>(dp => dp.Value);
+
+				internal static readonly MethodInfo ClearValue = MemberHelper.MethodOf<Data.DataParameter>(dp => dp.ClearValue(false));
+				internal static readonly MethodInfo SetType    = MemberHelper.MethodOf<Data.DataParameter>(dp => dp.SetType(default));
 			}
 
 			internal static class Exceptions

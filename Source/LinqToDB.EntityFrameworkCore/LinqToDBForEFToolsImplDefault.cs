@@ -387,6 +387,13 @@ namespace LinqToDB.EntityFrameworkCore
 					continue;
 				}
 
+				var nullableUnderlyingType = Nullable.GetUnderlyingType(modelType);
+				if (nullableUnderlyingType?.IsEnum == true)
+				{
+					MapEnumType(nullableUnderlyingType);
+					continue;
+				}
+
 				// skipping arrays
 				if (modelType.IsArray)
 					continue;
@@ -415,7 +422,7 @@ namespace LinqToDB.EntityFrameworkCore
 			void MapEFCoreType(Type modelType)
 			{
 				var currentType = mappingSchema.GetDataType(modelType);
-				if (!currentType.Equals(SqlDataType.Undefined))
+				if (!currentType.Type.EqualsDbOnly(SqlDataType.MakeUndefined(modelType).Type))
 					return;
 
 				var infos = convertorSelector.Select(modelType).ToArray();
@@ -462,8 +469,8 @@ namespace LinqToDB.EntityFrameworkCore
 			);
 
 		private static Expression WithConvertToObject(Expression valueExpression) 
-			=> valueExpression.Type != typeof(object) 
-				? Expression.Convert(valueExpression, typeof(object)) 
+			=> valueExpression.Type != typeof(object)
+				? Expression.Convert(valueExpression, typeof(object))
 				: valueExpression;
 
 		/// <summary>

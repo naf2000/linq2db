@@ -97,7 +97,7 @@ namespace LinqToDB.Internal.SqlProvider
 		/// </summary>
 		[DataMember(Order = 12)]
 		public bool IsSupportsJoinWithoutCondition { get; set; }
-		
+
 		/// <summary>
 		/// Indicates support for skip clause in column expression subquery.
 		/// Default (set by <see cref="DataProviderBase"/>): <c>true</c>.
@@ -538,6 +538,18 @@ namespace LinqToDB.Internal.SqlProvider
 		[DataMember(Order = 61), DefaultValue(false)]
 		public bool IsCrossJoinSyntaxRequired { get; set; }
 
+		/// <summary>
+		/// When disabled, SQL dialect doesn't support Take/LIMIT &amp; IN/ALL/ANY/SOME subquery.
+		/// </summary>
+		[DataMember(Order = 62), DefaultValue(true)]
+		public bool IsTakeWithInAllAnySomeSubquerySupported { get; set; } = true;
+
+		/// <summary>
+		/// Indicates that provider supports simple COALESCE translation without complex translation.
+		/// </summary>
+		[DataMember(Order = 63), DefaultValue(true)]
+		public bool IsSimpleCoalesceSupported { get; set; } = true;
+
 		public bool GetAcceptsTakeAsParameterFlag(SelectQuery selectQuery)
 		{
 			return AcceptsTakeAsParameter || AcceptsTakeAsParameterIfSkip && selectQuery.Select.SkipValue != null;
@@ -622,6 +634,8 @@ namespace LinqToDB.Internal.SqlProvider
 				^ IsOrderByAggregateFunctionSupported                  .GetHashCode()
 				^ IsComplexJoinConditionSupported                      .GetHashCode()
 				^ IsCrossJoinSyntaxRequired                            .GetHashCode()
+				^ IsTakeWithInAllAnySomeSubquerySupported              .GetHashCode()
+				^ IsSimpleCoalesceSupported                            .GetHashCode()
 				^ CustomFlags.Aggregate(0, (hash, flag) => flag.GetHashCode() ^ hash);
 	}
 
@@ -688,6 +702,8 @@ namespace LinqToDB.Internal.SqlProvider
 				&& IsOrderByAggregateFunctionSupported                   == other.IsOrderByAggregateFunctionSupported
 				&& IsComplexJoinConditionSupported                       == other.IsComplexJoinConditionSupported
 				&& IsCrossJoinSyntaxRequired                             == other.IsCrossJoinSyntaxRequired
+				&& IsSimpleCoalesceSupported                             == other.IsSimpleCoalesceSupported
+				&& IsTakeWithInAllAnySomeSubquerySupported               == other.IsTakeWithInAllAnySomeSubquerySupported
 				&& CustomFlags.SetEquals(other.CustomFlags);
 		}
 		#endregion
