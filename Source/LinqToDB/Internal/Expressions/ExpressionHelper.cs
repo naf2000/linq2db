@@ -77,12 +77,19 @@ namespace LinqToDB.Internal.Expressions
 		/// </summary>
 		public static MemberExpression PropertyOrField(Expression obj, string name)
 		{
-			var pi = obj.Type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy);
-
+			var pi = obj.Type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
 			if (pi != null)
 				return Expression.Property(obj, pi);
 
-			var fi = obj.Type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+			var fi = obj.Type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+			if (fi != null)
+				return Expression.Field(obj, fi);
+
+			pi = obj.Type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy);
+			if (pi != null)
+				return Expression.Property(obj, pi);
+
+			fi = obj.Type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.FlattenHierarchy);
 			if (fi != null)
 				return Expression.Field(obj, fi);
 
@@ -93,6 +100,11 @@ namespace LinqToDB.Internal.Expressions
 			fi = obj.Type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy);
 			if (fi != null)
 				return Expression.Field(obj, fi);
+
+			if(obj.Type.IsInterface)
+				foreach(var iface in obj.Type.GetInterfaces())
+					if ((pi=iface.GetProperty(name))!=null)
+						return Expression.Property(obj, pi); 
 
 			throw new InvalidOperationException($"Instance property or field with name {name} not found on type {obj.Type}");
 		}
