@@ -1,4 +1,6 @@
-﻿using LinqToDB;
+﻿using System.Threading.Tasks;
+
+using LinqToDB;
 using LinqToDB.Data;
 
 using NUnit.Framework;
@@ -11,8 +13,8 @@ namespace Tests.Linq
 		[Test]
 		public void LoadSingle([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadSingle(db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSingle(db);
 		}
 
 		[Test]
@@ -22,9 +24,13 @@ namespace Tests.Linq
 			FSharp.WhereTest.RecordParametersMapping(db);
 		}
 
-		[ActiveIssue("F# unnecessary converts sub-query to enumerable leading to client-side filtering", SkipForLinqService = true)]
+#if NETFRAMEWORK
+		// needs FSharp.Core 10.1, but we use v9 for netfx builds now
+		[ActiveIssue("F# unnecessary converts sub-query to enumerable leading to client-side filtering")]
+#endif
+		// informix still struggle with non-ascii data in 2026
 		[Test]
-		public void RecordProjectionColumnsOnly([DataSources] string context)
+		public void RecordProjectionColumnsOnly([DataSources(TestProvName.AllInformix)] string context)
 		{
 			using var db = GetDataContext(context);
 			FSharp.WhereTest.RecordProjectionColumnsOnly(db);
@@ -35,7 +41,10 @@ namespace Tests.Linq
 			}
 		}
 
-		[ActiveIssue("F# unnecessary converts sub-query to enumerable leading to client-side filtering", SkipForLinqService = true)]
+#if NETFRAMEWORK
+		// needs FSharp.Core 10.1, but we use v9 for netfx builds now
+		[ActiveIssue("F# unnecessary converts sub-query to enumerable leading to client-side filtering")]
+#endif
 		[Test]
 		public void RecordComplexProjection([DataSources] string context)
 		{
@@ -91,103 +100,155 @@ namespace Tests.Linq
 		[Test]
 		public void LoadSinglesWithPatient([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadSinglesWithPatient( db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSinglesWithPatient(db);
 		}
 
-		[Test]
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/195")]
 		public void LoadSingleWithOptions([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSingleWithOptions(db);
+		}
+
+		[Test(Description = "Explicit MappingSchema option-type registration still works alongside UseFSharp auto-mapping")]
+		public void LoadSingleWithExplicitOptionsMapping([DataSources] string context)
 		{
 			var ms = FSharp.MappingSchema.Initialize();
 
-			using (var db = GetDataContext(context, ms))
-				FSharp.WhereTest.LoadSingleWithOptions(db);
+			using var db = GetDataContext(context, ms);
+			FSharp.WhereTest.LoadSingleWithOptions(db);
 		}
 
-		[ActiveIssue]
-		[Test(Description = "https://github.com/linq2db/linq2db/issues/195")]
-		public void BuiltInOptionsHandling([DataSources] string context)
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/4646")]
+		public void Issue4646_OptionRoundtrip([DataSources] string context)
 		{
 			using var db = GetDataContext(context);
+			FSharp.Issue4646.TestOptionRoundtrip(db);
+		}
 
-			FSharp.WhereTest.LoadSingleWithOptions(db);
+		[Test(Description = "Auto 'T option mapping must not override an explicit fluent DataType on an option column (#195 follow-up)")]
+		public void OptionMapping_ExplicitDataTypePreserved([DataSources] string context)
+		{
+			var ms = FSharp.OptionMappingPrecedence.BuildExplicitSchema();
+
+			using var db = GetDataContext(context, ms);
+			FSharp.OptionMappingPrecedence.VerifyExplicitDataTypePreserved(db);
+		}
+
+		[Test(Description = "Nullable<_> element option must not produce Nullable<Nullable<_>> (#195)")]
+		public void Option_NullableElementRoundtrip([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			FSharp.OptionTypes.TestNullableElementOptionRoundtrip(db);
+		}
+
+		[Test(Description = "F# struct value-options ('T voption) are auto-mapped like reference options (#195)")]
+		public void Option_ValueOptionRoundtrip([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			FSharp.OptionTypes.TestValueOptionRoundtrip(db);
+		}
+
+		[Test(Description = "Auto 'decimal option' mapping resolves provider-faithful precision/scale - no scale truncation (#195)")]
+		public void Option_DecimalRoundtrip([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			FSharp.OptionTypes.TestDecimalOptionRoundtrip(db);
+		}
+
+		[Test(Description = "An option over a complex/entity element is not auto-scalarized; only scalar-element options are (#195)")]
+		public void Option_ComplexElementNotScalarized([DataSources] string context)
+		{
+			using var db = GetDataContext(context);
+			FSharp.OptionTypes.VerifyComplexElementOptionNotScalarized(db);
+		}
+
+		[ActiveIssue("F# option auto-mapping gate (IsScalarOption) consults MappingSchema.Default, so an option over a type that is scalar only in the user/provider schema is not auto-mapped")]
+		[Test(Description = "An option over a type that is scalar only in the user/provider schema (not MappingSchema.Default) must still auto-map (#195)")]
+		public void Option_CustomScalarElementMapped([DataSources] string context)
+		{
+			var ms = FSharp.OptionTypes.BuildCustomScalarSchema();
+
+			using var db = GetDataContext(context, ms);
+			FSharp.OptionTypes.VerifyCustomScalarOptionMapped(db);
 		}
 
 		[Test]
 		public void LoadSingleCLIMutable([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadSingleCLIMutable(db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSingleCLIMutable(db);
 		}
 
 		[Test]
 		public void LoadSingleComplexPerson([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadSingleComplexPerson(db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSingleComplexPerson(db);
 		}
 
 		[Test]
 		public void LoadSingleDeeplyComplexPerson([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadSingleDeeplyComplexPerson(db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadSingleDeeplyComplexPerson(db);
 		}
 
 		[Test]
 		public void LoadColumnOfDeeplyComplexPerson([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.WhereTest.LoadColumnOfDeeplyComplexPerson(db);
+			using var db = GetDataContext(context);
+			FSharp.WhereTest.LoadColumnOfDeeplyComplexPerson(db);
 		}
 
 		[Test]
 		public void SelectField([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.SelectTest.SelectField(db);
+			using var db = GetDataContext(context);
+			FSharp.SelectTest.SelectField(db);
 		}
 
 		[Test]
 		public void SelectFieldDeeplyComplexPerson([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.SelectTest.SelectFieldDeeplyComplexPerson(db);
+			using var db = GetDataContext(context);
+			FSharp.SelectTest.SelectFieldDeeplyComplexPerson(db);
 		}
 
 		[Test]
-		public void Insert1([DataSources(ProviderName.Ydb, TestProvName.AllClickHouse)] string context)
+		public void Insert1([DataSources(TestProvName.AllYdb, TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.InsertTest.Insert1(db);
+			using var db = GetDataContext(context);
+			FSharp.InsertTest.Insert1(db);
 		}
 
 		[Test]
 		public void Insert2([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.InsertTest.Insert2(db, context.IsAnyOf(TestProvName.AllClickHouse) ? 100 : 0);
+			using var db = GetDataContext(context);
+			FSharp.InsertTest.Insert2(db, context.IsAnyOf(TestProvName.AllClickHouse) ? 100 : 0);
 		}
 
 		[Test]
 		public void SelectLeftJoin([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.SelectTest.SelectLeftJoin(db);
+			using var db = GetDataContext(context);
+			FSharp.SelectTest.SelectLeftJoin(db);
 		}
 
 		[Test]
 		public void TestIssue2678_SelectObject([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.Issue2678.InsertAndSelectObject(db);
+			using var db = GetDataContext(context);
+			FSharp.Issue2678.InsertAndSelectObject(db);
 		}
 
 		[Test]
 		public void TestIssue2678_SelectRecord([IncludeDataSources(true, TestProvName.AllSQLite, TestProvName.AllClickHouse)] string context)
 		{
-			using (var db = GetDataContext(context))
-				FSharp.Issue2678.InsertAndSelectRecord(db);
+			using var db = GetDataContext(context);
+			FSharp.Issue2678.InsertAndSelectRecord(db);
 		}
 
 		[Test(Description = "record type support")]
@@ -246,6 +307,62 @@ namespace Tests.Linq
 			FSharp.Issue4132.Issue4132Test2(db);
 		}
 
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateSetsOnlyChangedColumn([IncludeDataSources(false, TestProvName.AllSQLite)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateSetsOnlyChangedColumn(db, true);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateSetsOnlyChangedColumnYdb([IncludeDataSources(false, TestProvName.AllYdb)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateSetsOnlyChangedColumn(db, false);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public async Task Issue5598_UpdateSetsOnlyChangedColumnAsync([IncludeDataSources(false, TestProvName.AllSQLite)] string context)
+		{
+			using var db = GetDataConnection(context);
+			await FSharp.Issue5598.UpdateSetsOnlyChangedColumnAsync(db, true);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public async Task Issue5598_UpdateSetsOnlyChangedColumnAsyncYdb([IncludeDataSources(false, TestProvName.AllYdb)] string context)
+		{
+			using var db = GetDataConnection(context);
+			await FSharp.Issue5598.UpdateSetsOnlyChangedColumnAsync(db, false);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateSetsOnlyChangedColumnNoPredicate([IncludeDataSources(false, TestProvName.AllSQLite)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateSetsOnlyChangedColumnNoPredicate(db, true);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateSetsOnlyChangedColumnNoPredicateYdb([IncludeDataSources(false, TestProvName.AllYdb)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateSetsOnlyChangedColumnNoPredicate(db, false);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateNoOpExcludesPrimaryKey([IncludeDataSources(false, TestProvName.AllSQLite)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateNoOpExcludesPrimaryKey(db, true);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5598")]
+		public void Issue5598_UpdateNoOpExcludesPrimaryKeyYdb([IncludeDataSources(false, TestProvName.AllYdb)] string context)
+		{
+			using var db = GetDataConnection(context);
+			FSharp.Issue5598.UpdateNoOpExcludesPrimaryKey(db, false);
+		}
+
 		[ActiveIssue]
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/1813")]
 		public void Issue1813Test1([DataSources] string context)
@@ -298,6 +415,18 @@ namespace Tests.Linq
 		{
 			using var db = GetDataContext(context);
 			FSharp.Issue1813.Issue1813Test7(db);
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5428")]
+		public void ExpressionFunctionInCteTranslationTest1([IncludeDataSources(TestProvName.AllPostgreSQL)] string context)
+		{
+			FSharp.Issue5428.TestSimple(GetConnectionString(context));
+		}
+
+		[Test(Description = "https://github.com/linq2db/linq2db/issues/5428")]
+		public void ExpressionFunctionInCteTranslationTest2([IncludeDataSources(TestProvName.AllPostgreSQL)] string context)
+		{
+			FSharp.Issue5428.TestWindow(GetConnectionString(context));
 		}
 	}
 }

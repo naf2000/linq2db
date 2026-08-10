@@ -16,7 +16,7 @@ namespace LinqToDB.Internal.Linq.Builder
 		#region InsertOrUpdateBuilder
 
 		public static bool CanBuildMethod(MethodCallExpression call)
-			=> call.IsQueryable();
+			=> call.IsQueryable;
 
 		protected override BuildSequenceResult BuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 		{
@@ -38,7 +38,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			UpdateBuilder.ParseSetter(builder, contextRef, contextRef, insertSetterExpr, insertExpressions);
 
 			var updateExpr = methodCall.Arguments[2].Unwrap();
-			if (!updateExpr.IsNullValue())
+			if (!updateExpr.IsNullValue)
 			{
 				updateExpressions = new List<UpdateBuilder.SetExpressionEnvelope>();
 				var updateSetterExpr = SequenceHelper.PrepareBody(updateExpr.UnwrapLambda(), sequence);
@@ -131,7 +131,22 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			public override void SetRunQuery<T>(Query<T> query, Expression expr)
 			{
-				if (Builder.DataContext.SqlProviderFlags.IsInsertOrUpdateSupported)
+				var flags = Builder.DataContext.SqlProviderFlags;
+
+				// Providers whose native single-statement upsert applies one VALUES list to both
+				// branches (SAP HANA UPSERT … WITH PRIMARY KEY) cannot honor divergent Insert/Update
+				// SET expressions — and the legacy InsertOrUpdate(insertSetter, updateSetter, ...)
+				// API allows the user to specify completely different SET shapes for the two branches.
+				// The same native form also matches on the table PRIMARY KEY only, so a caller-supplied
+				// non-PK key selector (the 3-arg InsertOrUpdate(…, keySelector)) would be silently
+				// ignored. In either case fall back to the UPDATE→INSERT emulation, which honors both
+				// the per-branch SET shapes and the requested match key.
+				var needsEmulation =
+					flags.IsInsertOrUpdateRequiresAlignedBranches
+					&& (UpsertBuilder.HasDivergentInsertOrUpdateBranches(InsertOrUpdateStatement)
+						|| UpsertBuilder.MatchKeysDivergeFromPrimaryKey(InsertOrUpdateStatement));
+
+				if (flags.IsInsertOrUpdateSupported && !needsEmulation)
 					QueryRunner.SetNonQueryQuery(query);
 				else
 					QueryRunner.MakeAlternativeInsertOrUpdate(Builder.DataContext.MappingSchema, query);

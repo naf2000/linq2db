@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using LinqToDB.Data;
 using LinqToDB.Internal.Common;
@@ -16,7 +17,7 @@ namespace LinqToDB.DataProvider.SQLite
 	/// <param name="AlwaysCheckDbNull">
 	/// Enables null-value checks during database data mapping even if SQLite reports that column cannot be <c>NULL</c> to
 	/// avoid <see cref="NullReferenceException"/> on mapping when database reports nullability incorrectly.
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	public sealed record SQLiteOptions
 	(
@@ -42,7 +43,7 @@ namespace LinqToDB.DataProvider.SQLite
 
 		#region IEquatable implementation
 
-		public bool Equals(SQLiteOptions? other)
+		public bool Equals([NotNullWhen(true)] SQLiteOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

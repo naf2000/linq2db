@@ -27,7 +27,7 @@ namespace LinqToDB.Internal.Linq.Builder
 						Type.IsInterface: true,
 						BuildContext.ElementType: var elementType,
 					} contextRef,
-					Member: var member
+					Member: var member,
 				}
 				&& elementType != contextRef.Type)
 			{
@@ -70,11 +70,26 @@ namespace LinqToDB.Internal.Linq.Builder
 				}
 			}
 
-			if (expression != null && member.ReflectedType != expression.Type)
+			if (expression != null && (member.ReflectedType != expression.Type || member.DeclaringType != expression.Type))
 			{
 				var newMember = expression.Type.GetMemberEx(member);
 				if (newMember != null)
+				{
+					// Look up using the realized concrete type rather than newMember.DeclaringType,
+					// which may be an abstract base or interface that the metadata reader doesn't
+					// recognize as an entity (e.g. EFCoreMetadataReader returns nothing for types
+					// not registered in the EF model). After a projection such as
+					// Select(x => x.Customer) the member's ReflectedType may already match
+					// expression.Type while its DeclaringType still points at the unregistered
+					// base — covered by the second arm of the guard.
+					if (MappingSchema.GetAttribute<AssociationAttribute>(expression.Type, newMember) != null)
+					{
+						associationMember = newMember;
+						return true;
+					}
+
 					return IsAssociationInRealization(null, newMember, out associationMember);
+				}
 			}
 
 			associationMember = null;
@@ -126,7 +141,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			else
 				return null;
 
-			if (expression.NodeType == ExpressionType.MemberAccess || expression.NodeType == ExpressionType.Call)
+			if (expression.NodeType is ExpressionType.MemberAccess or ExpressionType.Call)
 				memberInfo = new AccessorMember(expression);
 
 			if (memberInfo == null)
@@ -156,7 +171,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					var newInfo = entityDescriptor.ObjectType.GetImplementation(memberInfo);
 					if (newInfo != null)
 					{
-						attribute  = MappingSchema.GetAttribute<AssociationAttribute>(newInfo.DeclaringType!, newInfo);
+						attribute = MappingSchema.GetAttribute<AssociationAttribute>(newInfo.DeclaringType!, newInfo);
 						memberInfo = newInfo;
 					}
 				}
@@ -180,16 +195,22 @@ namespace LinqToDB.Internal.Linq.Builder
 						attribute.AliasName
 					);
 			}
-			else if (memberInfo.MemberType == MemberTypes.Property || memberInfo.MemberType == MemberTypes.Field)
+			else if (memberInfo.MemberType is MemberTypes.Property or MemberTypes.Field)
 			{
 				foreach (var ed in entityDescriptor.Associations)
+				{
 					if (ed.MemberInfo.EqualsTo(memberInfo))
 						return ed;
+				}
 
 				foreach (var m in entityDescriptor.InheritanceMapping)
+				{
 					foreach (var ed in MappingSchema.GetEntityDescriptor(m.Type).Associations)
+					{
 						if (ed.MemberInfo.EqualsTo(memberInfo))
 							return ed;
+					}
+				}
 			}
 
 			return descriptor;
@@ -221,7 +242,13 @@ namespace LinqToDB.Internal.Linq.Builder
 			}
 			else if (typeof(IOrderedEnumerable<>).IsSameOrParentOf(desiredType))
 			{
-				result = expression;
+				// IOrderedEnumerable<T> isn't satisfied by List<T>/IEnumerable<T> — wrap with
+				// PassThroughOrderedCollection<T> which presents the source as IOrderedEnumerable
+				// without re-sorting (the source is already in the desired order from SQL).
+				var passThroughType = typeof(PassThroughOrderedCollection<>).MakeGenericType(elementType);
+				var enumerableType  = typeof(IEnumerable<>).MakeGenericType(elementType);
+				var ctor            = passThroughType.GetConstructor([enumerableType])!;
+				result = Expression.New(ctor, expression);
 			}
 			else if (!typeof(IQueryable<>).IsSameOrParentOf(desiredType) && !desiredType.IsArray)
 			{

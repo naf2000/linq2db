@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 
 using LinqToDB;
+using LinqToDB.Internal.Common;
 using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Mapping;
 
@@ -260,7 +261,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		[YdbMemberNotFound]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void ExceptInheritance([DataSources] string context)
 		{
 			using var db       = GetDataContext(context);
@@ -284,7 +285,7 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		[YdbMemberNotFound]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void IntersectInheritance([DataSources] string context)
 		{
 			using var db       = GetDataContext(context);
@@ -317,23 +318,17 @@ namespace Tests.Linq
 
 		static IQueryable<T> Combine<T>(IQueryable<T> query1, IQueryable<T> query2, SetOperation operation)
 		{
-			switch (operation)
+			return operation switch
 			{
-				case SetOperation.Union:
-					return query1.Union(query2);
-				case SetOperation.UnionAll:
-					return query1.UnionAll(query2);
-				case SetOperation.Except:
-					return query1.Except(query2);
-				case SetOperation.ExceptAll:
-					return query1.ExceptAll(query2);
-				case SetOperation.Intersect:
-					return query1.Intersect(query2);
-				case SetOperation.IntersectAll:
-					return query1.IntersectAll(query2);
-				default:
-					throw new ArgumentOutOfRangeException(nameof(operation), operation, null);
-			}
+				SetOperation.Union        => query1.Union(query2),
+				SetOperation.UnionAll     => query1.UnionAll(query2),
+				SetOperation.Except       => query1.Except(query2),
+				SetOperation.ExceptAll    => query1.ExceptAll(query2),
+				SetOperation.Intersect    => query1.Intersect(query2),
+				SetOperation.IntersectAll => query1.IntersectAll(query2),
+
+				_ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null),
+			};
 		}
 
 		[Test]
@@ -366,7 +361,11 @@ namespace Tests.Linq
 
 			var query = Combine(query1, query2, operation);
 
-			AssertQuery(query);
+			// YDB can't run the correlated subqueries these set operations require over eager-loaded details.
+			if (context.IsAnyOf(TestProvName.AllYdb) && operation is SetOperation.Except or SetOperation.ExceptAll or SetOperation.Intersect or SetOperation.IntersectAll)
+				Assert.That(() => query.ToList(), Throws.InstanceOf<LinqToDBException>().With.Message.Contains(ErrorHelper.Error_Correlated_Subqueries));
+			else
+				AssertQuery(query);
 		}
 
 		[Test]
@@ -399,7 +398,11 @@ namespace Tests.Linq
 
 			var query = Combine(query1, query2, operation);
 
-			AssertQuery(query);
+			// YDB can't run the correlated subqueries these set operations require over eager-loaded details.
+			if (context.IsAnyOf(TestProvName.AllYdb) && operation is SetOperation.Except or SetOperation.ExceptAll or SetOperation.Intersect or SetOperation.IntersectAll)
+				Assert.That(() => query.ToList(), Throws.InstanceOf<LinqToDBException>().With.Message.Contains(ErrorHelper.Error_Correlated_Subqueries));
+			else
+				AssertQuery(query);
 		}
 
 		[Test]
@@ -463,7 +466,11 @@ namespace Tests.Linq
 
 			var query = Combine(query1, query2, operation);
 
-			AssertQuery(query, new DictionaryEqualityComparer<string, string>());
+			// YDB can't run the correlated subqueries these set operations require over eager-loaded details.
+			if (context.IsAnyOf(TestProvName.AllYdb) && operation is SetOperation.Except or SetOperation.ExceptAll or SetOperation.Intersect or SetOperation.IntersectAll)
+				Assert.That(() => query.ToList(), Throws.InstanceOf<LinqToDBException>().With.Message.Contains(ErrorHelper.Error_Correlated_Subqueries));
+			else
+				AssertQuery(query, new DictionaryEqualityComparer<string, string>());
 		}
 
 		class ByBookTypeResult
@@ -495,7 +502,7 @@ namespace Tests.Linq
 						return false;
 					}
 
-					if (x.Authors == null && y.Authors != null || x.Authors != null && y.Authors == null)
+					if ((x.Authors == null && y.Authors != null) || (x.Authors != null && y.Authors == null))
 					{
 						return false;
 					}

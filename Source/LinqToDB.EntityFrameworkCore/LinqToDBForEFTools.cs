@@ -62,6 +62,8 @@ namespace LinqToDB.EntityFrameworkCore
 					?? throw new LinqToDBForEFToolsException("Can not evaluate current context from query");
 
 				var dc = CreateLinqToDBContext(context);
+				// #5364: implicit context is never disposed — release the EF connection per command.
+				dc.CloseAfterUse = true;
 				var newExpression = queryable.Expression;
 
 				var result = instantiator.MakeGenericMethod(queryable.ElementType)
@@ -92,6 +94,7 @@ namespace LinqToDB.EntityFrameworkCore
 				ArgumentNullException.ThrowIfNull(value);
 				_implementation = value;
 				_metadataReaders.Clear();
+				_mappingSchemas .Clear();
 				_defaultMetadataReader = new Lazy<IMetadataReader?>(() => Implementation.CreateMetadataReader(null, null));
 			}
 		}
@@ -100,12 +103,15 @@ namespace LinqToDB.EntityFrameworkCore
 
 		static Lazy<IMetadataReader?> _defaultMetadataReader;
 
+		static readonly ConcurrentDictionary<(object ModelKey, DataOptions? DataOptions, bool Tracking), MappingSchema> _mappingSchemas = new();
+
 		/// <summary>
 		/// Clears internal caches
 		/// </summary>
 		public static void ClearCaches()
 		{
 			_metadataReaders.Clear();
+			_mappingSchemas .Clear();
 			Implementation.ClearCaches();
 			Query.ClearCaches();
 		}
@@ -120,7 +126,7 @@ namespace LinqToDB.EntityFrameworkCore
 		/// Creates or return existing metadata provider for provided EF Core data model. If model is null, empty metadata
 		/// provider will be returned.
 		/// </summary>
-		/// <param name="model">EF Core data model instance. Could be <c>null</c>.</param>
+		/// <param name="model">EF Core data model instance. Could be <see langword="null"/>.</param>
 		/// <param name="accessor">EF Core service provider.</param>
 		/// <returns>LINQ To DB metadata provider.</returns>
 		public static IMetadataReader? GetMetadataReader(
@@ -130,7 +136,7 @@ namespace LinqToDB.EntityFrameworkCore
 			if (model == null)
 				return _defaultMetadataReader.Value;
 
-			return _metadataReaders.GetOrAdd(model, m => Implementation.CreateMetadataReader(model, accessor));
+			return _metadataReaders.GetOrAdd(model, static (m, a) => Implementation.CreateMetadataReader(m, a), accessor);
 		}
 
 		/// <summary>
@@ -155,7 +161,7 @@ namespace LinqToDB.EntityFrameworkCore
 				Connection = context.Database.GetDbConnection(),
 				Transaction = context.Database.CurrentTransaction?.GetDbTransaction(),
 				Context = context,
-				Options = GetContextOptions(context)
+				Options = GetContextOptions(context),
 			};
 
 			return info;
@@ -172,7 +178,7 @@ namespace LinqToDB.EntityFrameworkCore
 			{
 				Connection = connection,
 				Context = null,
-				Options = null
+				Options = null,
 			};
 
 			return info;
@@ -189,7 +195,7 @@ namespace LinqToDB.EntityFrameworkCore
 			{
 				Connection = null,
 				Context = null,
-				Options = options
+				Options = options,
 			};
 
 			return info;
@@ -222,12 +228,37 @@ namespace LinqToDB.EntityFrameworkCore
 			IInfrastructure<IServiceProvider>? accessor,
 			DataOptions? dataOptions)
 		{
+			// Share one mapping schema — and therefore one ConfigurationID — across DbContext
+			// instances of the same model, keyed on EF's own model-cache key. A fresh IModel per
+			// context (pooled contexts, EnableServiceProviderCaching(false), multiple internal
+			// service providers) would otherwise yield a fresh schema identity and the linq2db
+			// query cache would miss on every context.
+			if (accessor is DbContext context)
+			{
+				var factory = context.GetService<IModelCacheKeyFactory>();
+#if EF31
+				var modelKey = factory.Create(context);
+#else
+				var modelKey = factory.Create(context, false);
+#endif
+
+				return _mappingSchemas.GetOrAdd(
+					(modelKey, dataOptions, EnableChangeTracker),
+					static (_, state) => BuildMappingSchema(state.model, state.accessor, state.dataOptions),
+					(model, accessor, dataOptions));
+			}
+
+			return BuildMappingSchema(model, accessor, dataOptions);
+		}
+
+		static MappingSchema BuildMappingSchema(IModel model, IInfrastructure<IServiceProvider>? accessor, DataOptions? dataOptions)
+		{
 			var converterSelector = accessor?.GetService<IValueConverterSelector>();
-			var mappingSource = accessor?.GetService<IRelationalTypeMappingSource>();
-			
+			var mappingSource     = accessor?.GetService<IRelationalTypeMappingSource>();
+
 			return Implementation.GetMappingSchema(model, mappingSource, GetMetadataReader(model, accessor), converterSelector, dataOptions);
 		}
-		
+
 		/// <summary>
 		/// Creates mapping schema using provided EF Core data model.
 		/// </summary>
@@ -310,7 +341,7 @@ namespace LinqToDB.EntityFrameworkCore
 		}
 
 		private static readonly TraceSwitch _defaultTraceSwitch =
-			new("DataConnection", "DataConnection trace switch", TraceLevel.Info.ToString());
+			new("DataConnection", "DataConnection trace switch", nameof(TraceLevel.Info));
 
 		static DataOptions EnableTracing(DataOptions options, ILogger? logger)
 		{
@@ -337,20 +368,17 @@ namespace LinqToDB.EntityFrameworkCore
 		/// <param name="context">EF Core database context.</param>
 		/// <param name="transaction">Transaction instance.</param>
 		/// <returns>Linq To DB data context.</returns>
-		public static IDataContext CreateLinqToDBContext(this DbContext context,
-			IDbContextTransaction? transaction = null)
+		public static IDataContext CreateLinqToDBContext(this DbContext context, IDbContextTransaction? transaction = null)
 		{
 			ArgumentNullException.ThrowIfNull(context);
 
 			var info    = GetEFProviderInfo(context);
 			var options = context.GetLinqToDBOptions() ?? new DataOptions();
-			options     = options.UseAdditionalMappingSchema(GetMappingSchema(context.Model, context, options));
+			options = options.UseAdditionalMappingSchema(GetMappingSchema(context.Model, context, options));
 
-			DataConnection? dc = null;
+			transaction ??= context.Database.CurrentTransaction;
 
-			transaction     ??= context.Database.CurrentTransaction;
-			var dbTransaction = transaction?.GetDbTransaction() ?? info.Transaction;
-
+			var dbTransaction  = transaction?.GetDbTransaction() ?? info.Transaction;
 			var connectionInfo = GetConnectionInfo(info, dbTransaction);
 			var provider       = GetDataProvider(options, info, connectionInfo);
 			var logger         = CreateLogger(info.Options);
@@ -358,37 +386,13 @@ namespace LinqToDB.EntityFrameworkCore
 
 			if (dbTransaction != null)
 			{
-				// TODO: we need API for testing current connection
-				// if (provider.IsCompatibleConnection(dbTransaction.Connection))
 				options = options.UseTransaction(provider, dbTransaction);
-				dc = new LinqToDBForEFToolsDataConnection(context, options, context.Model, TransformExpression);
+				return new LinqToDBForEFToolsDataConnection(context, options, context.Model, TransformExpression);
 			}
 
-			if (dc == null)
-			{
-				var dbConnection = context.Database.GetDbConnection();
-				// TODO: we need API for testing current connection
-				options = options.UseConnection(provider, dbConnection);
-				if (true /*provider.IsCompatibleConnection(dbConnection)*/)
-					dc = new LinqToDBForEFToolsDataConnection(context, options, context.Model, TransformExpression);
-				else
-				{
-					/*
-					// special case when we have to create data connection by itself
-					var dataContext = new LinqToDBForEFToolsDataContext(context, provider, connectionInfo.ConnectionString, context.Model, TransformExpression);
-
-					if (mappingSchema != null)
-						dataContext.MappingSchema = mappingSchema;
-
-					if (logger != null)
-						dataContext.OnTraceConnection = t => Implementation.LogConnectionTrace(t, logger);
-
-					return dataContext;
-					*/
-				}
-			}
-
-			return dc;
+			var dbConnection = context.Database.GetDbConnection();
+			options = options.UseConnection(provider, dbConnection);
+			return new LinqToDBForEFToolsDataConnection(context, options, context.Model, TransformExpression);
 		}
 
 		/// <summary>
@@ -434,7 +438,7 @@ namespace LinqToDB.EntityFrameworkCore
 			{
 				Connection = connection ?? extracted?.Connection,
 				Transaction = transaction ?? info.Transaction ?? extracted?.Transaction,
-				ConnectionString = extracted?.ConnectionString
+				ConnectionString = extracted?.ConnectionString,
 			};
 		}
 
@@ -513,7 +517,7 @@ namespace LinqToDB.EntityFrameworkCore
 		{
 			var options = context.GetLinqToDBOptions();
 
-			if (options?.DataContextOptions.Interceptors?.Any() == true)
+			if (options?.DataContextOptions.Interceptors?.Count > 0)
 			{
 				foreach (var interceptor in options.DataContextOptions.Interceptors)
 					dc.AddInterceptor(interceptor);
@@ -539,6 +543,11 @@ namespace LinqToDB.EntityFrameworkCore
 #pragma warning disable CA2000 // Dispose objects before losing scope
 			var dc = CreateLinqToDBContext(context);
 #pragma warning restore CA2000 // Dispose objects before losing scope
+
+			// #5364: this implicit context is never disposed, so release the EF connection after
+			// each command (as EF Core itself does) instead of holding it open until dispose.
+			// Only closes what linq2db actually opened, so an ambient transaction is unaffected.
+			dc.CloseAfterUse = true;
 
 			return new LinqToDBForEFQueryProvider<T>(dc, query.Expression);
 		}

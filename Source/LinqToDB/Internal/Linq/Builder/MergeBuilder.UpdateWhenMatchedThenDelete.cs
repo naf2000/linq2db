@@ -4,6 +4,7 @@ using System.Linq.Expressions;
 
 using LinqToDB.Expressions;
 using LinqToDB.Internal.Expressions;
+using LinqToDB.Internal.Mapping;
 using LinqToDB.Internal.SqlQuery;
 
 using static LinqToDB.Internal.Reflection.Methods.LinqToDB.Merge;
@@ -31,7 +32,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				var setter          = methodCall.Arguments[2];
 				var deletePredicate = methodCall.Arguments[3];
 
-				if (!setter.IsNullValue())
+				if (!setter.IsNullValue)
 				{
 					var setterLambda = setter.UnwrapLambda();
 					var setterExpression = mergeContext.SourceContext.PrepareTargetSource(setterLambda);
@@ -57,12 +58,11 @@ namespace LinqToDB.Internal.Linq.Builder
 
 					foreach (var field in sqlTable.Fields.Where(f => f.IsUpdatable).Except(keys))
 					{
-						var sourceExpr = ExpressionExtensions.GetMemberGetter(field.ColumnDescriptor.MemberInfo, sourceProp);
-						var targetExpr = ExpressionExtensions.GetMemberGetter(field.ColumnDescriptor.MemberInfo, targetProp);
+						var sourceExpr = field.ColumnDescriptor.GetMemberAccessExpression(sourceProp);
+						var targetExpr = field.ColumnDescriptor.GetMemberAccessExpression(targetProp);
 
 						var tgtExpr = builder.ConvertToSql(mergeContext.SourceContext.SourceContextRef.BuildContext, targetExpr);
-						var srcExpr = builder.ConvertToSql(mergeContext.SourceContext.SourceContextRef.BuildContext, sourceExpr);;
-
+						var srcExpr = builder.ConvertToSql(mergeContext.SourceContext.SourceContextRef.BuildContext, sourceExpr);
 						operation.Items.Add(new SqlSetExpression(tgtExpr, srcExpr));
 					}
 				}
@@ -70,7 +70,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				var saveIsSourceOuter = mergeContext.SourceContext.IsSourceOuter;
 				mergeContext.SourceContext.IsSourceOuter = false;
 
-				if (!predicate.IsNullValue())
+				if (!predicate.IsNullValue)
 				{
 					var predicateCondition = predicate.UnwrapLambda();
 					var predicateConditionCorrected = mergeContext.SourceContext.PrepareTargetSource(predicateCondition);
@@ -80,7 +80,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					builder.BuildSearchCondition(mergeContext.SourceContext, predicateConditionCorrected, operation.Where);
 				}
 
-				if (!deletePredicate.IsNullValue())
+				if (!deletePredicate.IsNullValue)
 				{
 					var deleteCondition = deletePredicate.UnwrapLambda();
 					var deleteConditionCorrected = mergeContext.SourceContext.PrepareTargetSource(deleteCondition);

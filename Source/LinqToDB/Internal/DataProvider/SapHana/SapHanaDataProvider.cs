@@ -13,6 +13,7 @@ using LinqToDB.DataProvider.SapHana;
 using LinqToDB.Internal.DataProvider.SapHana.Translation;
 using LinqToDB.Internal.Extensions;
 using LinqToDB.Internal.SqlProvider;
+using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Linq.Translation;
 using LinqToDB.Mapping;
 using LinqToDB.SchemaProvider;
@@ -31,20 +32,41 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 		{
 			Provider = provider;
 
-			SqlProviderFlags.IsParameterOrderDependent         = true;
+			SqlProviderFlags.IsSubQueryOrderBySupported = false;
+			SqlProviderFlags.IsUnionAllOrderBySupported = true;
+			SqlProviderFlags.IsParameterOrderDependent  = true;
 			//Exception: Sap.Data.Hana.HanaException
 			//Message: single-row query returns more than one row
 			//when expression returns more than 1 row
 			//mark this as supported, it's better to throw exception
 			//instead of replace with left join, in which case returns incorrect data
 			SqlProviderFlags.IsCorrelatedSubQueryTakeSupported = false;
-			SqlProviderFlags.IsInsertOrUpdateSupported         = false;
 			SqlProviderFlags.IsUpdateFromSupported             = false;
 			SqlProviderFlags.IsApplyJoinSupported              = true;
 			SqlProviderFlags.IsCrossApplyJoinSupportsCondition = true;
 			SqlProviderFlags.IsOuterApplyJoinSupportsCondition = true;
 			SqlProviderFlags.IsCommonTableExpressionsSupported = true;
+			SqlProviderFlags.IsNullsOrderingSupported          = true;
+			SqlProviderFlags.DefaultNullsOrdering              = NullsDefaultOrdering.Smallest; // SAP HANA sorts NULL as the smallest value
 			SqlProviderFlags.SupportsBooleanType               = false;
+			// SAP HANA's per-SELECT column limit (~1000) caps how wide a CteUnion carrier projection can
+			// grow before the eager-loading strategy falls back to KeyedQuery. Not validated against a live
+			// HANA engine; verify against the documented limit before relying on it.
+			SqlProviderFlags.MaxColumnCount                    = 1000;
+
+			// Native single-statement upsert via HANA's UPSERT … WITH PRIMARY KEY. The statement
+			// applies one VALUES list to both branches and has no UPDATE-side predicate, so:
+			//   * IsInsertOrUpdateWithPredicateSupported  = false → Update.When falls back to the
+			//     3-query SELECT→UPDATE→INSERT orchestration.
+			//   * IsInsertOrUpdateRequiresAlignedBranches = true → per-branch SET divergence
+			//     (Insert(i => …) / Update(v => …) overrides) falls back to UPDATE→INSERT emulation.
+			SqlProviderFlags.IsInsertOrUpdateSupported               = true;
+			SqlProviderFlags.IsInsertOrUpdateWithPredicateSupported  = false;
+			SqlProviderFlags.IsInsertOrUpdateRequiresAlignedBranches = true;
+
+			// HANA's MERGE is restricted — it rejects the two-branch (WHEN NOT MATCHED + WHEN MATCHED)
+			// shape linq2db synthesizes for Upsert's bulk / non-PK-match / conditional-insert paths.
+			SqlProviderFlags.IsUpsertWithMergeLoweringSupported = false;
 
 			_sqlOptimizer = new SapHanaSqlOptimizer(SqlProviderFlags);
 
@@ -117,6 +139,7 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 			if (value is DateOnly d)
 				value = d.ToDateTime(TimeOnly.MinValue);
 #endif
+
 			switch (dataType.DataType)
 			{
 				case DataType.Boolean:
@@ -198,46 +221,55 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 
 		public override BulkCopyRowsCopied BulkCopy<T>(DataOptions options, ITable<T> table, IEnumerable<T> source)
 		{
-			if (Provider == SapHanaProvider.ODBC)
-				return base.BulkCopy(options, table, source);
+			return Provider switch
+			{
+				SapHanaProvider.ODBC => base.BulkCopy(options, table, source),
 
-			return new SapHanaBulkCopy(this).BulkCopy(
-				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
-					options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
-					options.BulkCopyOptions.BulkCopyType,
-				table,
-				options,
-				source);
+				_ => new SapHanaBulkCopy(this).BulkCopy(
+					options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
+						options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
+						options.BulkCopyOptions.BulkCopyType,
+					table,
+					options,
+					source
+				),
+			};
 		}
 
 		public override Task<BulkCopyRowsCopied> BulkCopyAsync<T>(DataOptions options, ITable<T> table, IEnumerable<T> source, CancellationToken cancellationToken)
 		{
-			if (Provider == SapHanaProvider.ODBC)
-				return base.BulkCopyAsync(options, table, source, cancellationToken);
+			return Provider switch
+			{
+				SapHanaProvider.ODBC => base.BulkCopyAsync(options, table, source, cancellationToken),
 
-			return new SapHanaBulkCopy(this).BulkCopyAsync(
-				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
-					options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
-					options.BulkCopyOptions.BulkCopyType,
-				table,
-				options,
-				source,
-				cancellationToken);
+				_ => new SapHanaBulkCopy(this).BulkCopyAsync(
+					options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
+						options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
+						options.BulkCopyOptions.BulkCopyType,
+					table,
+					options,
+					source,
+					cancellationToken
+				),
+			};
 		}
 
 		public override Task<BulkCopyRowsCopied> BulkCopyAsync<T>(DataOptions options, ITable<T> table, IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
-			if (Provider == SapHanaProvider.ODBC)
-				return base.BulkCopyAsync(options, table, source, cancellationToken);
+			return Provider switch
+			{
+				SapHanaProvider.ODBC => base.BulkCopyAsync(options, table, source, cancellationToken),
 
-			return new SapHanaBulkCopy(this).BulkCopyAsync(
-				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
-					options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
-					options.BulkCopyOptions.BulkCopyType,
-				table,
-				options,
-				source,
-				cancellationToken);
+				_ => new SapHanaBulkCopy(this).BulkCopyAsync(
+					options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
+						options.FindOrDefault(SapHanaOptions.Default).BulkCopyType :
+						options.BulkCopyOptions.BulkCopyType,
+					table,
+					options,
+					source,
+					cancellationToken
+				),
+			};
 		}
 
 		public override bool? IsDBNullAllowed(DataOptions options, DbDataReader reader, int idx)
@@ -265,7 +297,7 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 		{
 			if (Provider == SapHanaProvider.ODBC && commandType == CommandType.StoredProcedure)
 			{
-				commandText = $"{{ CALL {commandText} ({string.Join(",", (parameters ?? []).Select(x => "?"))}) }}";
+				commandText = $"{{ CALL {commandText} ({string.JoinStrings(',', (parameters ?? []).Select(x => "?"))}) }}";
 				commandType = CommandType.Text;
 			}
 

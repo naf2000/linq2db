@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data.Linq;
@@ -14,6 +15,7 @@ using JetBrains.Annotations;
 
 using LinqToDB.Expressions;
 using LinqToDB.Internal.Common;
+using LinqToDB.Internal.Expressions;
 using LinqToDB.Internal.Extensions;
 using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Mapping;
@@ -65,8 +67,7 @@ namespace LinqToDB.Linq
 		{
 			memberInfoWithType = NormalizeMemeberInfo(memberInfoWithType);
 
-			if (!Members.TryGetValue(providerName, out var dic))
-				Members.Add(providerName, dic = new Dictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>());
+			var dic = Members.GetOrAdd(providerName, static _ => new());
 
 			var expr = new LazyExpressionInfo();
 
@@ -84,8 +85,7 @@ namespace LinqToDB.Linq
 
 		public static void MapMember(string providerName, MemberInfo memberInfo, IExpressionInfo expressionInfo)
 		{
-			if (!Members.TryGetValue(providerName, out var dic))
-				Members.Add(providerName, dic = new Dictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>());
+			var dic = Members.GetOrAdd(providerName, static _ => new());
 
 			dic[new MemberHelper.MemberInfoWithType(memberInfo.ReflectedType, memberInfo)] = expressionInfo;
 
@@ -131,13 +131,11 @@ namespace LinqToDB.Linq
 
 		static BinaryExpression GetBinaryNode(Expression expr)
 		{
-			while (expr.NodeType is ExpressionType.Convert or ExpressionType.ConvertChecked or ExpressionType.TypeAs)
-				expr = ((UnaryExpression)expr).Operand;
-
-			if (expr is BinaryExpression binary)
-				return binary;
-
-			throw new ArgumentException($"Expression '{expr}' is not BinaryExpression node.");
+			return expr.UnwrapUnary() switch
+			{
+				BinaryExpression binary => binary,
+				_ => throw new ArgumentException($"Expression '{expr}' is not BinaryExpression node."),
+			};
 		}
 
 		/// <summary>
@@ -148,7 +146,7 @@ namespace LinqToDB.Linq
 		/// <param name="leftType">Exact type of <see cref="BinaryExpression.Left"/> member.</param>
 		/// <param name="rightType">Exact type of  <see cref="BinaryExpression.Right"/> member.</param>
 		/// <param name="expression">Lambda expression which has to replace <see cref="BinaryExpression"/></param>
-		/// <remarks>Note that method is not thread safe and has to be used only in Application's initialization section.</remarks>
+		/// <remarks>Registration is thread-safe; for predictable results configure mappings during application initialization, before queries are executed.</remarks>
 		public static void MapBinary(
 			string           providerName,
 			ExpressionType   nodeType,
@@ -156,19 +154,18 @@ namespace LinqToDB.Linq
 			Type             rightType,
 			LambdaExpression expression)
 		{
-			if (providerName == null) throw new ArgumentNullException(nameof(providerName));
-			if (leftType     == null) throw new ArgumentNullException(nameof(leftType));
-			if (rightType    == null) throw new ArgumentNullException(nameof(rightType));
-			if (expression   == null) throw new ArgumentNullException(nameof(expression));
+			ArgumentNullException.ThrowIfNull(providerName);
+			ArgumentNullException.ThrowIfNull(leftType);
+			ArgumentNullException.ThrowIfNull(rightType);
+			ArgumentNullException.ThrowIfNull(expression);
 
-			if (!_binaries.Value.TryGetValue(providerName, out var dic))
-				_binaries.Value.Add(providerName, dic = new Dictionary<Tuple<ExpressionType,Type,Type>,IExpressionInfo>());
+			var dic = _binaries.Value.GetOrAdd(providerName, static _ => new());
 
 			var expr = new LazyExpressionInfo();
 
 			expr.SetExpression(expression);
 
-			dic[Tuple.Create(nodeType, leftType, rightType)] = expr;
+			dic[(nodeType, leftType, rightType)] = expr;
 
 			_checkUserNamespace = false;
 		}
@@ -180,7 +177,7 @@ namespace LinqToDB.Linq
 		/// <param name="leftType">Exact type of <see cref="BinaryExpression.Left"/> member.</param>
 		/// <param name="rightType">Exact type of  <see cref="BinaryExpression.Right"/> member.</param>
 		/// <param name="expression">Lambda expression which has to replace <see cref="BinaryExpression"/>.</param>
-		/// <remarks>Note that method is not thread safe and has to be used only in Application's initialization section.</remarks>
+		/// <remarks>Registration is thread-safe; for predictable results configure mappings during application initialization, before queries are executed.</remarks>
 		public static void MapBinary(
 			ExpressionType   nodeType,
 			Type             leftType,
@@ -199,7 +196,7 @@ namespace LinqToDB.Linq
 		/// <param name="providerName">Name of database provider to use with this connection. <see cref="ProviderName"/> class for list of providers.</param>
 		/// <param name="binaryExpression">Expression which has to be replaced.</param>
 		/// <param name="expression">Lambda expression which has to replace <paramref name="binaryExpression"/>.</param>
-		/// <remarks>Note that method is not thread safe and has to be used only in Application's initialization section.</remarks>
+		/// <remarks>Registration is thread-safe; for predictable results configure mappings during application initialization, before queries are executed.</remarks>
 		public static void MapBinary<TLeft,TRight,TR>(
 			string                            providerName,
 			Expression<Func<TLeft,TRight,TR>> binaryExpression,
@@ -216,7 +213,7 @@ namespace LinqToDB.Linq
 		/// <typeparam name="TR">Result type of <paramref name="binaryExpression"/>.</typeparam>
 		/// <param name="binaryExpression">Expression which has to be replaced.</param>
 		/// <param name="expression">Lambda expression which has to replace <paramref name="binaryExpression"/>.</param>
-		/// <remarks>Note that method is not thread safe and has to be used only in Application's initialization section.</remarks>
+		/// <remarks>Registration is thread-safe; for predictable results configure mappings during application initialization, before queries are executed.</remarks>
 		public static void MapBinary<TLeft,TRight,TR>(
 			Expression<Func<TLeft,TRight,TR>> binaryExpression,
 			Expression<Func<TLeft,TRight,TR>> expression)
@@ -336,7 +333,7 @@ namespace LinqToDB.Linq
 
 			if (!Members[""].TryGetValue(memberKey, out expr))
 			{
-				if (mi is MethodInfo && mi.Name == "CompareString" && mi.DeclaringType!.FullName!.StartsWith("Microsoft.VisualBasic.CompilerServices."))
+				if (mi is MethodInfo && string.Equals(mi.Name, "CompareString", StringComparison.Ordinal) && mi.DeclaringType!.FullName!.StartsWith("Microsoft.VisualBasic.CompilerServices.", StringComparison.Ordinal))
 				{
 					lock (_memberSync)
 					{
@@ -344,11 +341,11 @@ namespace LinqToDB.Linq
 						{
 							expr = new LazyExpressionInfo();
 
-#pragma warning disable CA1304, MA0011 // use CultureInfo
+#pragma warning disable CA1304, CA1311, MA0011 // use CultureInfo
 							((LazyExpressionInfo)expr).SetExpression(L<string,string,bool,int>((s1,s2,b) => b ? string.CompareOrdinal(s1.ToUpper(), s2.ToUpper()) : string.CompareOrdinal(s1, s2)));
-#pragma warning restore CA1304, MA0011 // use CultureInfo
+#pragma warning restore CA1304, CA1311, MA0011 // use CultureInfo
 
-							Members[""].Add(memberKey, expr);
+							Members[""][memberKey] = expr;
 						}
 					}
 				}
@@ -357,7 +354,7 @@ namespace LinqToDB.Linq
 			if (expr == null)
 			{
 				if (mi is MethodInfo method &&
-				    (method.IsVirtual || method.DeclaringType != null && method.ReflectedType != null && method.DeclaringType.IsAssignableFrom(method.ReflectedType)))
+				    (method.IsVirtual || (method.DeclaringType != null && method.ReflectedType != null && method.DeclaringType.IsAssignableFrom(method.ReflectedType))))
 				{
 					// walking up through hierarchy to find registered converter
 					//
@@ -399,10 +396,10 @@ namespace LinqToDB.Linq
 				return null;
 
 			IExpressionInfo? expr;
-			Dictionary<Tuple<ExpressionType,Type,Type>,IExpressionInfo>? dic;
+			ConcurrentDictionary<(ExpressionType,Type,Type),IExpressionInfo>? dic;
 
 			var binaries = _binaries.Value;
-			var key      = Tuple.Create(binaryExpression.NodeType, binaryExpression.Left.Type, binaryExpression.Right.Type);
+			var key      = (binaryExpression.NodeType, binaryExpression.Left.Type, binaryExpression.Right.Type);
 
 			foreach (var configuration in mappingSchema.ConfigurationList)
 			{
@@ -433,18 +430,12 @@ namespace LinqToDB.Linq
 			if (typeNamespace == null)
 				return true;
 
-			var dotIndex = typeNamespace.IndexOf('.');
+			var dotIndex = typeNamespace.IndexOf('.', StringComparison.Ordinal);
 			var root     = dotIndex != -1 ? typeNamespace.Substring(0, dotIndex) : typeNamespace;
 
 			// Startup optimization.
 			//
-			switch (root)
-			{
-				case "LinqToDB" :
-				case "System"   :
-				case "Microsoft": return false;
-				default         : return true;
-			}
+			return root is not ("LinqToDB" or "System" or "Microsoft");
 		}
 
 		public static MemberHelper.MemberInfoWithType M<T>(Expression<Func<T,object?>> func)
@@ -485,7 +476,7 @@ namespace LinqToDB.Linq
 			}
 		}
 
-		static Dictionary<string,Dictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>> Members
+		static ConcurrentDictionary<string,ConcurrentDictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>> Members
 		{
 			get
 			{
@@ -503,8 +494,7 @@ namespace LinqToDB.Linq
 
 		private static readonly Lock _memberSync = new();
 
-		static readonly Lazy<Dictionary<string,Dictionary<Tuple<ExpressionType,Type,Type>,IExpressionInfo>>> _binaries =
-			new Lazy<Dictionary<string,Dictionary<Tuple<ExpressionType,Type,Type>,IExpressionInfo>>>(() => new Dictionary<string,Dictionary<Tuple<ExpressionType,Type,Type>,IExpressionInfo>>());
+		static readonly Lazy<ConcurrentDictionary<string,ConcurrentDictionary<(ExpressionType,Type,Type),IExpressionInfo>>> _binaries = new(() => new(StringComparer.Ordinal));
 
 		#region Common
 
@@ -540,44 +530,22 @@ namespace LinqToDB.Linq
 			{ M(() => "".PadRight   (0,' ')   ), N(() => L<string?,int,char,string?>       ((obj,p0,p1)    => Sql.PadRight (obj, p0, p1))) },
 			{ M(() => "".Trim       ()        ), N(() => L<string?,string?>                (obj            => Sql.Trim     (obj))) },
 
-#if NET8_0_OR_GREATER
-			{ M(() => "".TrimEnd    ()        ), N(() => L<string,string?>                 (obj      => TrimRight(obj)))     },
-			{ M(() => "".TrimEnd    (' ')     ), N(() => L<string,char,string?>            ((obj,ch) => TrimRight(obj, ch))) },
-			{ M(() => "".TrimStart  ()        ), N(() => L<string,string?>                 (obj      => TrimLeft (obj)))     },
-			{ M(() => "".TrimStart  (' ')     ), N(() => L<string,char,string?>            ((obj,ch) => TrimLeft (obj, ch))) },
-#endif
-			{ M(() => "".TrimEnd    ((char[])null!)), N(() => L<string,char[],string?>     ((obj,ch) => TrimRight(obj, ch))) },
-			{ M(() => "".TrimStart  ((char[])null!)), N(() => L<string,char[],string?>     ((obj,ch) => TrimLeft (obj, ch))) },
-#pragma warning disable CA1304, MA0011 // use CultureInfo
+#pragma warning disable CA1304, CA1311, MA0011 // use CultureInfo
 			{ M(() => "".ToLower    ()        ), N(() => L<string?,string?>                (obj => Sql.Lower(obj))) },
 			{ M(() => "".ToUpper    ()        ), N(() => L<string?,string?>                (obj => Sql.Upper(obj))) },
-#pragma warning restore CA1304, MA0011 // use CultureInfo
-			{ M(() => "".CompareTo  ("")      ), N(() => L<string,string,int>              ((obj,p0) => ConvertToCaseCompareTo(obj, p0)!.Value)) },
-#pragma warning disable MA0107 // object.ToString is bad, m'kay?
-			{ M(() => "".CompareTo  (1)       ), N(() => L<string,object,int>              ((obj,p0) => ConvertToCaseCompareTo(obj, p0.ToString())!.Value)) },
-
-			{ M(() => string.Concat((object)null!)                             ), N(() => L<object,string?>                    (p0         => p0.ToString()))           },
-			{ M(() => string.Concat((object)null!,(object)null!)               ), N(() => L<object,object,string>              ((p0,p1)    => p0.ToString() + p1))      },
-			{ M(() => string.Concat((object)null!,(object)null!,(object)null!) ), N(() => L<object,object,object,string>       ((p0,p1,p2) => p0.ToString() + p1 + p2)) },
-#pragma warning restore MA0107 // object.ToString is bad, m'kay?
-			{ M(() => string.Concat((object[])null!)                           ), N(() => L<object?[],string?>                 (ps            => Sql.Concat(ps)))          },
-			{ M(() => string.Concat("","")                                     ), N(() => L<string,string,string>              ((p0,p1)       => p0 + p1))                 },
-			{ M(() => string.Concat("","","")                                  ), N(() => L<string,string,string,string>       ((p0,p1,p2)    => p0 + p1 + p2))            },
-			{ M(() => string.Concat("","","","")                               ), N(() => L<string,string,string,string,string>((p0,p1,p2,p3) => p0 + p1 + p2 + p3))       },
-			{ M(() => string.Concat((string[])null!)                           ), N(() => L<string?[],string?>                 (ps            => Sql.Concat(ps)))          },
+#pragma warning restore CA1304, CA1311, MA0011 // use CultureInfo
 
 			{ M(() => string.IsNullOrEmpty ("")    ),                                         N(() => L<string,bool>                                   (p0                 => p0 == null || p0.Length == 0)) },
-			{ M(() => string.IsNullOrWhiteSpace("")),                                         N(() => L<string,bool>                                   (p0                 => Sql.IsNullOrWhiteSpace(p0))) },
 			{ M(() => string.CompareOrdinal("","")),                                          N(() => L<string,string,int>                             ((s1,s2)            => s1.CompareTo(s2))) },
 			{ M(() => string.CompareOrdinal("",0,"",0,0)),                                    N(() => L<string,int,string,int,int,int>                 ((s1,i1,s2,i2,l)    => s1.Substring(i1, l).CompareTo(s2.Substring(i2, l)))) },
+#pragma warning disable CA1304, CA1309, CA1310, CA1311, CA1862, MA0011 // use CultureInfo
 			{ M(() => string.Compare       ("","")),                                          N(() => L<string,string,int>                             ((s1,s2)            => s1.CompareTo(s2))) },
 			{ M(() => string.Compare       ("",0,"",0,0)),                                    N(() => L<string,int,string,int,int,int>                 ((s1,i1,s2,i2,l)    => s1.Substring(i1,l).CompareTo(s2.Substring(i2,l)))) },
-#pragma warning disable CA1304, MA0011 // use CultureInfo
 			{ M(() => string.Compare       ("","",true)),                                     N(() => L<string,string,bool,int>                        ((s1,s2,b)          => b ? s1.ToLower().CompareTo(s2.ToLower()) : s1.CompareTo(s2))) },
 			{ M(() => string.Compare       ("",0,"",0,0,true)),                               N(() => L<string,int,string,int,int,bool,int>            ((s1,i1,s2,i2,l,b)  => b ? s1.Substring(i1,l).ToLower().CompareTo(s2.Substring(i2, l).ToLower()) : s1.Substring(i1, l).CompareTo(s2.Substring(i2, l)))) },
 			{ M(() => string.Compare       ("",0,"",0,0,StringComparison.OrdinalIgnoreCase)), N(() => L<string,int,string,int,int,StringComparison,int>((s1,i1,s2,i2,l,sc) => sc == StringComparison.CurrentCultureIgnoreCase || sc==StringComparison.OrdinalIgnoreCase ? s1.Substring(i1,l).ToLower().CompareTo(s2.Substring(i2, l).ToLower()) : s1.Substring(i1, l).CompareTo(s2.Substring(i2, l)))) },
 			{ M(() => string.Compare       ("","",StringComparison.OrdinalIgnoreCase)),       N(() => L<string,string,StringComparison,int>            ((s1,s2,sc)         => sc == StringComparison.CurrentCultureIgnoreCase || sc==StringComparison.OrdinalIgnoreCase ? s1.ToLower().CompareTo(s2.ToLower()) : s1.CompareTo(s2))) },
-#pragma warning restore CA1304, MA0011 // use CultureInfo
+#pragma warning restore CA1304, CA1309, CA1310, CA1311, CA1862, MA0011 // use CultureInfo
 
 			{ M(() => AltStuff("",0,0,"")), N(() => L<string,int?,int?,string,string>((p0,p1,p2,p3) => Sql.Left(p0, p1 - 1) + p3 + Sql.Right(p0, p0.Length - (p1 + p2 - 1)))) },
 
@@ -677,6 +645,7 @@ namespace LinqToDB.Linq
 			#endregion
 
 			#region SqlTypes
+#pragma warning disable MA0073 // Avoid comparison with bool constant
 
 			{ M(() => new SqlBoolean().Value),   N(() => L<SqlBoolean,bool>(obj => (bool)obj))          },
 			{ M(() => new SqlBoolean().IsFalse), N(() => L<SqlBoolean,bool>(obj => (bool)obj == false)) },
@@ -684,6 +653,7 @@ namespace LinqToDB.Linq
 			{ M(() => SqlBoolean.True),          N(() => L                 (()               => true))  },
 			{ M(() => SqlBoolean.False),         N(() => L                 (()               => false)) },
 
+#pragma warning restore MA0073 // Avoid comparison with bool constant
 			#endregion
 		};
 #pragma warning restore CS0618 // Type or member is obsolete
@@ -691,9 +661,9 @@ namespace LinqToDB.Linq
 		#endregion
 
 #pragma warning disable CS0618 // Type or member is obsolete
-		static Dictionary<string,Dictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>> LoadMembers()
+		static ConcurrentDictionary<string,ConcurrentDictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>> LoadMembers()
 		{
-			var members = new Dictionary<string,Dictionary<MemberHelper.MemberInfoWithType,IExpressionInfo>>
+			var members = new Dictionary<string, Dictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>>(StringComparer.Ordinal)
 			{
 				{ "", _commonMembers },
 
@@ -935,18 +905,18 @@ namespace LinqToDB.Linq
 					{ M(() => Sql.Round      (0.0)  ), N(() => L<double?, double?>   (d => d - Sql.Floor(d) == 0.5  && Sql.Floor(d) % 2 == 0? Sql.Ceiling(d) : AccessRound(d, 0))) },
 					{ M(() => Sql.Round      (0m, 0)), N(() => L<decimal?,int?,decimal?>((v,p)=> (decimal?)(
 						p == 1 ? Sql.Round(v * 10) / 10 :
-						p == 2 ? Sql.Round(v * 10) / 10 :
-						p == 3 ? Sql.Round(v * 10) / 10 :
-						p == 4 ? Sql.Round(v * 10) / 10 :
-						p == 5 ? Sql.Round(v * 10) / 10 :
-								 Sql.Round(v * 10) / 10))) },
+						p == 2 ? Sql.Round(v * 100) / 100 :
+						p == 3 ? Sql.Round(v * 1_000) / 1_000 :
+						p == 4 ? Sql.Round(v * 10_000) / 10_000 :
+						p == 5 ? Sql.Round(v * 100_000) / 100_000 :
+								 Sql.Round(v * 1_000_000) / 1_000_000))) },
 					{ M(() => Sql.Round      (0.0,0)), N(() => L<double?,int?,double?>((v,p) => (double?)(
 						p == 1 ? Sql.Round(v * 10) / 10 :
-						p == 2 ? Sql.Round(v * 10) / 10 :
-						p == 3 ? Sql.Round(v * 10) / 10 :
-						p == 4 ? Sql.Round(v * 10) / 10 :
-						p == 5 ? Sql.Round(v * 10) / 10 :
-								 Sql.Round(v * 10) / 10))) },
+						p == 2 ? Sql.Round(v * 100) / 100 :
+						p == 3 ? Sql.Round(v * 1_000) / 1_000 :
+						p == 4 ? Sql.Round(v * 10_000) / 10_000 :
+						p == 5 ? Sql.Round(v * 100_000) / 100_000 :
+								 Sql.Round(v * 1_000_000) / 1_000_000))) },
 					{ M(() => Sql.RoundToEven(0m)   ), N(() => L<decimal?,decimal?>     ( v   => AccessRound(v, 0))) },
 					{ M(() => Sql.RoundToEven(0.0)  ), N(() => L<double?, double?>      ( v   => AccessRound(v, 0))) },
 					{ M(() => Sql.RoundToEven(0m, 0)), N(() => L<decimal?,int?,decimal?>((v,p)=> AccessRound(v, p))) },
@@ -1019,7 +989,12 @@ namespace LinqToDB.Linq
 
 #endif
 
-			return members;
+			// Snapshot into ConcurrentDictionary (outer + inner) so registration via MapMember can run
+			// concurrently with - and alongside other registrations of - the lock-free ConvertMember reads.
+			return new ConcurrentDictionary<string, ConcurrentDictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>>(
+				members.Select(static m => new KeyValuePair<string, ConcurrentDictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>>(
+					m.Key, new ConcurrentDictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>(m.Value))),
+				StringComparer.Ordinal);
 		}
 #pragma warning restore CS0618 // Type or member is obsolete
 
@@ -1027,8 +1002,7 @@ namespace LinqToDB.Linq
 
 		public static void MapMember(string providerName, Type objectType, MemberInfo memberInfo, LambdaExpression expression)
 		{
-			if (!Members.TryGetValue(providerName, out var dic))
-				Members.Add(providerName, dic = new Dictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>());
+			var dic = Members.GetOrAdd(providerName, static _ => new());
 
 			var expr = new LazyExpressionInfo();
 
@@ -1041,8 +1015,7 @@ namespace LinqToDB.Linq
 
 		public static void MapMember(string providerName, Type objectType, MemberInfo memberInfo, IExpressionInfo expressionInfo)
 		{
-			if (!Members.TryGetValue(providerName, out var dic))
-				Members.Add(providerName, dic = new Dictionary<MemberHelper.MemberInfoWithType, IExpressionInfo>());
+			var dic = Members.GetOrAdd(providerName, static _ => new());
 
 			dic[new MemberHelper.MemberInfoWithType(objectType, memberInfo)] = expressionInfo;
 
@@ -1064,156 +1037,20 @@ namespace LinqToDB.Linq
 
 		#region Sql specific
 
-		// TODO: move to translators and implement YDB using Re2::Replace regexp function
 		// TODO: Made private or remove in v7
 		[Obsolete("This API will be removed in version 7"), EditorBrowsable(EditorBrowsableState.Never)]
-		// Missing support for trimChars: Access, SqlCe, SybaseASE
-		// Firebird/MySQL - chars parameter treated as string, not as set of characters
 		[CLSCompliant(false)]
-		[Sql.Extension(ProviderName.Firebird      , "TRIM(TRAILING {1} FROM {0})", ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(TrailingRTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.ClickHouse    , "trim(TRAILING {1} FROM {0})", ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlServer     , "RTRIM({0})"                 , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilderNoTrimCharacters))]
-		[Sql.Extension(ProviderName.SqlCe         , "RTRIM({0})"                 , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilderNoTrimCharacters))]
-		[Sql.Extension(ProviderName.SqlServer2022 , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlServer2025 , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.DB2           , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Informix      , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Oracle        , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder), IsNullable = Sql.IsNullableType.Nullable)]
-		[Sql.Extension(ProviderName.PostgreSQL    , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SapHana       , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SQLite        , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Access        , "RTRIM({0}, {1})"            , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilderNoTrimCharacters))]
-		[Sql.Extension(ProviderName.MySql         , "TRIM(TRAILING {1} FROM {0})", ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(TrailingRTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Sybase        , "RTRIM({0})"                 , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(RTrimCharactersBuilderNoTrimCharacters))]
-		public static string? TrimRight(string? str, [SqlQueryDependent] params char[] trimChars)
+		public static string? TrimRight(string? str, params char[] trimChars)
 		{
 			return str?.TrimEnd(trimChars);
 		}
 
-		// TODO: move to translators and implement YDB using Re2::Replace regexp function
 		// TODO: Made private or remove in v7
 		[Obsolete("This API will be removed in version 7"), EditorBrowsable(EditorBrowsableState.Never)]
-		// Missing support for trimChars: Access, SqlCe, SybaseASE
-		// Firebird/MySQL - chars parameter treated as string, not as set of characters
 		[CLSCompliant(false)]
-		[Sql.Expression(ProviderName.Firebird     , "TRIM(LEADING FROM {0})"    , ServerSideOnly = false, PreferServerSide = false)]
-		[Sql.Extension(ProviderName.ClickHouse    , "trim(LEADING {1} FROM {0})", ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlServer2022 , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlServer2025 , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.DB2           , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Informix      , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Oracle        , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder), IsNullable = Sql.IsNullableType.Nullable)]
-		[Sql.Extension(ProviderName.PostgreSQL    , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SapHana       , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SQLite        , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.MySql         , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Access        , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlServer     , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.SqlCe         , "LTRIM({0}, {1})"           , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		[Sql.Extension(ProviderName.Sybase        , "LTRIM({0})"                , ServerSideOnly = false, PreferServerSide = false, BuilderType = typeof(LTrimCharactersBuilder))]
-		public static string? TrimLeft(string? str, [SqlQueryDependent] params char[] trimChars)
+		public static string? TrimLeft(string? str, params char[] trimChars)
 		{
 			return str?.TrimStart(trimChars);
-		}
-
-		sealed class LTrimCharactersBuilder : Sql.IExtensionCallBuilder
-		{
-			public void Build(Sql.ISqlExtensionBuilder builder)
-			{
-				var stringExpression = builder.GetExpression("str")!;
-				var chars            = builder.GetValue<char[]>("trimChars");
-				if (chars == null || chars.Length == 0)
-				{
-					builder.ResultExpression = new SqlFunction(
-						builder.Mapping.GetDbDataType(typeof(string)),
-						(string)"LTRIM",
-						stringExpression);
-					return;
-				}
-
-				builder.ResultExpression = new SqlExpression(
-					builder.Mapping.GetDbDataType(typeof(string)),
-					builder.Expression,
-					Precedence.Primary,
-					stringExpression,
-					new SqlExpression(builder.Mapping.GetDbDataType(typeof(string)), "{0}", new SqlValue(new string(chars))));
-			}
-		}
-
-		sealed class TrailingRTrimCharactersBuilder : Sql.IExtensionCallBuilder
-		{
-			public void Build(Sql.ISqlExtensionBuilder builder)
-			{
-				var stringExpression = builder.GetExpression("str")!;
-				var chars            = builder.GetValue<char[]>("trimChars");
-				if (chars == null || chars.Length == 0)
-				{
-					builder.ResultExpression = new SqlExpression(
-						builder.Mapping.GetDbDataType(typeof(string)),
-						"TRIM(TRAILING FROM {0})",
-						stringExpression);
-					return;
-				}
-
-				ISqlExpression result = stringExpression;
-
-				//TODO: Not accurate, we have to find way
-				foreach (var c in chars)
-				{
-					result = new SqlExpression(
-						builder.Mapping.GetDbDataType(typeof(string)),
-						builder.Expression,
-						Precedence.Primary,
-						result,
-						new SqlValue(c.ToString()));
-				}
-
-				builder.ResultExpression = result;
-			}
-		}
-
-		sealed class RTrimCharactersBuilder : Sql.IExtensionCallBuilder
-		{
-			public void Build(Sql.ISqlExtensionBuilder builder)
-			{
-				var stringExpression = builder.GetExpression("str")!;
-				var chars            = builder.GetValue<char[]>("trimChars");
-				if (chars == null || chars.Length == 0)
-				{
-					builder.ResultExpression = new SqlFunction(
-						builder.Mapping.GetDbDataType(typeof(string)),
-						"RTRIM",
-						stringExpression);
-					return;
-				}
-
-				builder.ResultExpression = new SqlExpression(
-					builder.Mapping.GetDbDataType(typeof(string)),
-					builder.Expression,
-					Precedence.Primary,
-					stringExpression,
-					new SqlExpression(builder.Mapping.GetDbDataType(typeof(string)), "{0}", Precedence.Primary, new SqlValue(new string(chars))));
-			}
-		}
-
-		sealed class RTrimCharactersBuilderNoTrimCharacters : Sql.IExtensionCallBuilder
-		{
-			public void Build(Sql.ISqlExtensionBuilder builder)
-			{
-				var stringExpression = builder.GetExpression("str")!;
-				var chars            = builder.GetValue<char[]>("trimChars");
-				if (chars == null || chars.Length == 0)
-				{
-					builder.ResultExpression = new SqlFunction(
-						builder.Mapping.GetDbDataType(typeof(string)),
-						"RTRIM",
-						stringExpression);
-				}
-				else
-				{
-					builder.IsConvertible = false;
-				}
-			}
 		}
 
 		#endregion
@@ -1236,7 +1073,7 @@ namespace LinqToDB.Linq
 		[Sql.Extension(builderType: typeof(ConvertToCaseCompareToBuilder))]
 		public static int? ConvertToCaseCompareTo(string? str, string? value)
 		{
-			return str == null || value == null ? (int?)null : str.CompareTo(value);
+			return str == null || value == null ? (int?)null : StringComparer.Ordinal.Compare(str, value);
 		}
 
 		// Access, DB2, Firebird, Informix, MySql, Oracle, PostgreSQL, SQLite

@@ -1,9 +1,12 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace LinqToDB.CommandLine
+using LinqToDB.CommandLine.Commands;
+
+namespace LinqToDB.CommandLine.Options
 {
 	/// <summary>
 	/// Path to JSON file with CLI options.
@@ -47,7 +50,7 @@ namespace LinqToDB.CommandLine
 			var options = new JsonDocumentOptions()
 			{
 				CommentHandling = JsonCommentHandling.Skip,
-				AllowTrailingCommas = true
+				AllowTrailingCommas = true,
 			};
 			var json = JsonDocument.Parse(File.ReadAllText(rawValue), options);
 
@@ -61,7 +64,7 @@ namespace LinqToDB.CommandLine
 
 			foreach (var categoryProperty in json.RootElement.EnumerateObject())
 			{
-				var category = command.Categories.SingleOrDefault(c => c.JsonProperty == categoryProperty.Name);
+				var category = command.Categories.SingleOrDefault(c => string.Equals(c.JsonProperty, categoryProperty.Name, System.StringComparison.Ordinal));
 
 				if (category == null)
 				{

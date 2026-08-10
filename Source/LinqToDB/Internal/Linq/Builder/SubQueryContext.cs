@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 
 using LinqToDB.Internal.Expressions;
+using LinqToDB.Internal.Extensions;
 using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Mapping;
 
@@ -44,7 +45,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			SubQuery.SetAlias(alias);
 
-			if (alias.Contains('<'))
+			if (alias.Contains('<', StringComparison.Ordinal))
 				return;
 
 			var table = SelectQuery.From.Tables.FirstOrDefault();
@@ -85,7 +86,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			var result = Builder.BuildExpression(SubQuery, corrected);
 
-			if (flags.IsTraverse() || flags.IsAggregationRoot() || flags.IsSubquery() || flags.IsTable() || flags.IsAssociationRoot() || flags.IsRoot())
+			if (flags.IsTraverse() || flags.IsAggregationRoot() || flags.IsTable() || flags.IsAssociationRoot() || flags.IsRoot() || flags.IsSubquery())
 			{
 				return result;
 			}

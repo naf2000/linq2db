@@ -16,11 +16,12 @@ namespace Tests.Linq
 	{
 		sealed class BooleanTable
 		{
-			static BooleanTable()
+			static BooleanTable[] GetData()
 			{
 				var id = 1;
 
-				Data = (from boolean in new[] { true, false }
+				return (
+					from boolean in new[] { true, false }
 					from booleanN in new bool?[] { true, false, null }
 					from int32 in new[] { -1, 0, 1 }
 					from int32N in new int?[] { -1, 0, 1, null }
@@ -39,7 +40,9 @@ namespace Tests.Linq
 						DecimalN = decN,
 						Double   = dbl,
 						DoubleN  = dblТ,
-					}).ToArray();
+					}
+				)
+					.ToArray();
 			}
 
 			[PrimaryKey] public int Id { get; set; }
@@ -52,33 +55,36 @@ namespace Tests.Linq
 			[Column] public double Double { get; set; }
 			[Column] public double? DoubleN { get; set; }
 
-			public static readonly BooleanTable[] Data;
+			public static readonly BooleanTable[] Data = GetData();
 		}
 
 		sealed class SybaseBooleanTable
 		{
-			static SybaseBooleanTable()
+			static SybaseBooleanTable[] GetData()
 			{
 				var id = 1;
 
-				Data = (from boolean in new[] { true, false }
-						from int32 in new[] { -1, 0, 1 }
-						from int32N in new int?[] { -1, 0, 1, null }
-						from dec in new[] { -0.1m, 0m, 0.1m }
-						from decN in new decimal?[] { -0.1m, 0m, 0.1m, null }
-						from dbl in new[] { -0.1, 0.0, 0.1 }
-						from dblТ in new double?[] { -0.1, 0.0, 0.1, null }
-						select new SybaseBooleanTable()
-						{
-							Id = id++,
-							Boolean = boolean,
-							Int32 = int32,
-							Int32N = int32N,
-							Decimal = dec,
-							DecimalN = decN,
-							Double = dbl,
-							DoubleN = dblТ,
-						}).ToArray();
+				return (
+					from boolean in new[] { true, false }
+					from int32 in new[] { -1, 0, 1 }
+					from int32N in new int?[] { -1, 0, 1, null }
+					from dec in new[] { -0.1m, 0m, 0.1m }
+					from decN in new decimal?[] { -0.1m, 0m, 0.1m, null }
+					from dbl in new[] { -0.1, 0.0, 0.1 }
+					from dblТ in new double?[] { -0.1, 0.0, 0.1, null }
+					select new SybaseBooleanTable()
+					{
+						Id = id++,
+						Boolean = boolean,
+						Int32 = int32,
+						Int32N = int32N,
+						Decimal = dec,
+						DecimalN = decN,
+						Double = dbl,
+						DoubleN = dblТ,
+					}
+				)
+					.ToArray();
 			}
 
 			[PrimaryKey] public int Id { get; set; }
@@ -90,11 +96,12 @@ namespace Tests.Linq
 			[Column] public double Double { get; set; }
 			[Column] public double? DoubleN { get; set; }
 
-			public static readonly SybaseBooleanTable[] Data;
+			public static readonly SybaseBooleanTable[] Data = GetData();
 		}
 
 		[Test]
-		public void Test([DataSources(false, TestProvName.AllSybase)] string context)
+		// PostgreSQL 9.4+ (FILTER clause)
+		public void Test([DataSources(false, TestProvName.AllSybase, TestProvName.AllPostgreSQL93Minus)] string context)
 		{
 			using var db = GetDataContext(context);
 			using var tb = db.CreateLocalTable(BooleanTable.Data);

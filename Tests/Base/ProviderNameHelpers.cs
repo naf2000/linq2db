@@ -8,7 +8,7 @@ namespace Tests
 	public static class ProviderNameHelpers
 	{
 		/// <summary>
-		/// Returns <c>true</c>, if <paramref name="context"/> is a context or provider name for provider, mentioned
+		/// Returns <see langword="true"/>, if <paramref name="context"/> is a context or provider name for provider, mentioned
 		/// in any of <paramref name="providers"/>.
 		/// </summary>
 		/// <param name="context">Test provider name or context name (e.g. with .LinqService suffix).</param>
@@ -30,7 +30,7 @@ namespace Tests
 		/// </summary>
 		public static bool SupportsRowcount(this string context)
 		{
-			return !context.IsAnyOf(TestProvName.AllClickHouse, ProviderName.Ydb);
+			return !context.IsAnyOf(TestProvName.AllClickHouse, TestProvName.AllYdb);
 		}
 
 		public static bool IsUseParameters(this string context)
@@ -44,7 +44,7 @@ namespace Tests
 		}
 
 		/// <summary>
-		/// Returns <c>true</c> for remote context.
+		/// Returns <see langword="true"/> for remote context.
 		/// </summary>
 		public static bool IsRemote(this string context)
 		{

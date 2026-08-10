@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace LinqToDB.Internal.Linq.Builder
 {
@@ -53,9 +54,9 @@ namespace LinqToDB.Internal.Linq.Builder
 			return true;
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
-			return ReferenceEquals(this, obj) || obj is LoadWithEntity other && Equals(other);
+			return ReferenceEquals(this, obj) || (obj is LoadWithEntity other && Equals(other));
 		}
 
 		public override int GetHashCode()
@@ -66,9 +67,11 @@ namespace LinqToDB.Internal.Linq.Builder
 		public string ToDebugString()
 		{
 			var str = string.Join(", ", ToDebugStrings());
-			if (str is null or "")
-				return "[empty]";
-			return str;
+			return str switch
+			{
+				null or "" => "[empty]",
+				_ => str,
+			};
 		}
 	}
 }

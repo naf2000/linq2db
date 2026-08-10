@@ -18,6 +18,7 @@ namespace Tests.Linq
 		private TempTable<Src> SetupSrcTable(IDataContext db)
 		{
 #pragma warning disable CA2263 // Prefer generic overload when type is known
+#pragma warning disable CA1846 // Prefer 'AsSpan' over 'Substring'
 			new FluentMappingBuilder(db.MappingSchema)
 				.Entity<Src>()
 					.Property(e => e.CEnum)
@@ -25,6 +26,7 @@ namespace Tests.Linq
 						.HasLength(20)
 						.HasConversion(v => $"___{v}___", v => (ConvertedEnum)Enum.Parse(typeof(ConvertedEnum), v.Substring(3, v.Length - 6)))
 				.Build();
+#pragma warning restore CA1846 // Prefer 'AsSpan' over 'Substring'
 #pragma warning restore CA2263 // Prefer generic overload when type is known
 
 			var data = new[]
@@ -426,6 +428,26 @@ namespace Tests.Linq
 			var res = db.Person.Where(p => ids == null || ids.Contains(p.ID) || !ids.Any()).Count();
 
 			Assert.That(res, Is.EqualTo(expected));
+		}
+
+		[Test]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
+		public void ContainsSubqueryTest([DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+		{
+			using var db = GetDataContext(context);
+
+			var query =
+				from a in db.Parent
+				from t in
+					from t in db.Child
+					where db.GrandChild
+						.Where(c => c.ChildID == t.ChildID)
+						.Select(c => c.ParentID)
+						.Contains(a.ParentID)
+					select t
+				select a.ParentID;
+
+			AssertQuery(query);
 		}
 	}
 }

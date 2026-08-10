@@ -53,9 +53,9 @@ namespace Tests
 						// reset serial to next value
 						$"ALTER TABLE Person MODIFY (PersonID SERIAL({lastValue + 1}))",
 						// MODIFY erase all PK/FK constraints for modified column
-						$"ALTER TABLE Person ADD CONSTRAINT PRIMARY KEY (PersonID)",
-						$"ALTER TABLE Patient ADD CONSTRAINT(FOREIGN KEY (PersonID) REFERENCES Person (PersonID))",
-						$"ALTER TABLE Doctor ADD CONSTRAINT(FOREIGN KEY (PersonID) REFERENCES Person (PersonID))",
+						"ALTER TABLE Person ADD CONSTRAINT PRIMARY KEY (PersonID)",
+						"ALTER TABLE Patient ADD CONSTRAINT(FOREIGN KEY (PersonID) REFERENCES Person (PersonID))",
+						"ALTER TABLE Doctor ADD CONSTRAINT(FOREIGN KEY (PersonID) REFERENCES Person (PersonID))",
 
 					};
 						break;
@@ -64,12 +64,23 @@ namespace Tests
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllOracle):
 						sql = new[] {
-						$"DROP SEQUENCE \"PersonSeq\"",
-						$"CREATE SEQUENCE \"PersonSeq\" MINVALUE 1 START WITH {lastValue + 1}"
+						"DROP SEQUENCE \"PersonSeq\"",
+						$"CREATE SEQUENCE \"PersonSeq\" MINVALUE 1 START WITH {lastValue + 1}",
 					};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllPostgreSQL):
 						sql = new[] { $"ALTER SEQUENCE \"Person_PersonID_seq\" RESTART WITH {lastValue + 1}" };
+						break;
+					case string when provider.IsAnyOf(TestProvName.AllDuckDB):
+						sql = new[]
+						{
+							// Person.PersonID depends on the sequence (DEFAULT NEXTVAL); DuckDB can't drop a
+							// depended-on sequence, so detach the column default, drop+recreate, then reattach.
+							"ALTER TABLE \"Person\" ALTER COLUMN \"PersonID\" DROP DEFAULT",
+							"DROP SEQUENCE IF EXISTS \"Person_PersonID_seq\"",
+							$"CREATE SEQUENCE \"Person_PersonID_seq\" START {lastValue + 1}",
+							"ALTER TABLE \"Person\" ALTER COLUMN \"PersonID\" SET DEFAULT NEXTVAL('\"Person_PersonID_seq\"')",
+						};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllSapHana):
 						// SAP HANA doesn't allow identity management at all
@@ -90,7 +101,7 @@ CREATE COLUMN TABLE ""Person"" (
 						"INSERT INTO \"Person\" SELECT \"PersonID\", \"FirstName\", \"LastName\", \"MiddleName\", \"Gender\" FROM \"Person_OLD\"",
 						"DROP TABLE \"Person_OLD\"",
 						"ALTER TABLE \"Doctor\" ADD CONSTRAINT \"FK_Doctor_Person\" FOREIGN KEY (\"PersonID\") REFERENCES \"Person\" (\"PersonID\") ON UPDATE CASCADE ON DELETE CASCADE",
-						"ALTER TABLE \"Patient\" ADD CONSTRAINT \"FK_Patient_Person\" FOREIGN KEY (\"PersonID\") REFERENCES \"Person\" (\"PersonID\") ON UPDATE CASCADE ON DELETE CASCADE"
+						"ALTER TABLE \"Patient\" ADD CONSTRAINT \"FK_Patient_Person\" FOREIGN KEY (\"PersonID\") REFERENCES \"Person\" (\"PersonID\") ON UPDATE CASCADE ON DELETE CASCADE",
 					};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllSqlServer):
@@ -107,7 +118,7 @@ CREATE COLUMN TABLE ""Person"" (
 						// default schema for this table changes to temp on windows (sqlite bug?)
 						sql = new[] { $"UPDATE main.sqlite_sequence SET seq = {lastValue} WHERE name = 'Person'" };
 						break;
-					case string prov when prov.IsAnyOf(ProviderName.Ydb):
+					case string prov when prov.IsAnyOf(TestProvName.AllYdb):
 						sql = new[] { $"ALTER SEQUENCE `/local/Person/_serial_column_PersonID` RESTART WITH {lastValue + 1}" };
 						break;
 					default:
@@ -120,11 +131,9 @@ CREATE COLUMN TABLE ""Person"" (
 
 			if (sql != null)
 			{
-				using (var db = new DataConnection(provider))
-				{
-					foreach (var query in sql)
-						db.Execute(query);
-				}
+				using var db = new DataConnection(provider);
+				foreach (var query in sql)
+					db.Execute(query);
 			}
 		}
 
@@ -169,7 +178,7 @@ CREATE COLUMN TABLE ""Person"" (
 						// reset serial to next value
 						$"ALTER TABLE AllTypes MODIFY (ID SERIAL({lastValue + 1}))",
 						// MODIFY erase all PK/FK constraints for modified column
-						$"ALTER TABLE AllTypes ADD CONSTRAINT PRIMARY KEY (ID)",
+						"ALTER TABLE AllTypes ADD CONSTRAINT PRIMARY KEY (ID)",
 					};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllMySql):
@@ -177,12 +186,24 @@ CREATE COLUMN TABLE ""Person"" (
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllOracle):
 						sql = new[] {
-						$"DROP SEQUENCE \"AllTypesSeq\"",
-						$"CREATE SEQUENCE \"AllTypesSeq\" MINVALUE 1 START WITH {lastValue + 1}"
+						"DROP SEQUENCE \"AllTypesSeq\"",
+						$"CREATE SEQUENCE \"AllTypesSeq\" MINVALUE 1 START WITH {lastValue + 1}",
 					};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllPostgreSQL):
 						sql = new[] { $"ALTER SEQUENCE \"AllTypes_ID_seq\" RESTART WITH {lastValue + 1}" };
+						break;
+					case string when provider.IsAnyOf(TestProvName.AllDuckDB):
+						sql = new[]
+						{
+							// AllTypes.ID depends on the sequence (DEFAULT NEXTVAL), and DuckDB supports neither
+							// ALTER SEQUENCE RESTART nor dropping a depended-on sequence — so detach the column
+							// default, drop+recreate the sequence, then reattach.
+							"ALTER TABLE \"AllTypes\" ALTER COLUMN \"ID\" DROP DEFAULT",
+							"DROP SEQUENCE IF EXISTS \"AllTypes_ID_seq\"",
+							$"CREATE SEQUENCE \"AllTypes_ID_seq\" START {lastValue + 1}",
+							"ALTER TABLE \"AllTypes\" ALTER COLUMN \"ID\" SET DEFAULT NEXTVAL('\"AllTypes_ID_seq\"')",
+						};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllSapHana):
 						// SAP HANA doesn't allow identity management at all
@@ -239,7 +260,7 @@ CREATE COLUMN TABLE ""AllTypes""
 						sql = new[]
 						{
 							$"sp_chgattribute AllTypes, 'identity_burn_max', 0, '{lastValue}'",
-							$"sp_chgattribute KeepIdentityTest, 'identity_burn_max', 0, '{keepIdentityLastValue}'"
+							$"sp_chgattribute KeepIdentityTest, 'identity_burn_max', 0, '{keepIdentityLastValue}'",
 						};
 						break;
 					case string prov when prov.IsAnyOf(TestProvName.AllSQLite):
@@ -247,7 +268,7 @@ CREATE COLUMN TABLE ""AllTypes""
 						// default schema for this table changes to temp on windows (sqlite bug?)
 						sql = new[] { $"UPDATE main.sqlite_sequence SET seq = {lastValue} WHERE name = 'AllTypes'" };
 						break;
-					case string prov when prov.IsAnyOf(ProviderName.Ydb):
+					case string prov when prov.IsAnyOf(TestProvName.AllYdb):
 						sql = new[] { $"ALTER SEQUENCE `/local/AllTypes/_serial_column_ID` RESTART WITH {lastValue + 1}" };
 						break;
 					default:
@@ -260,11 +281,9 @@ CREATE COLUMN TABLE ""AllTypes""
 
 			if (sql != null)
 			{
-				using (var db = new DataConnection(provider))
-				{
-					foreach (var query in sql)
-						db.Execute(query);
-				}
+				using var db = new DataConnection(provider);
+				foreach (var query in sql)
+					db.Execute(query);
 			}
 		}
 
@@ -285,16 +304,25 @@ CREATE COLUMN TABLE ""AllTypes""
 					case string prov when prov.IsAnyOf(TestProvName.AllPostgreSQL):
 						sql = new[] { $"ALTER SEQUENCE sequencetestseq RESTART WITH {lastValue + 1}" };
 						break;
+					case string when provider.IsAnyOf(TestProvName.AllDuckDB):
+						sql = new[]
+						{
+							// SequenceTest3.ID depends on the sequence (DEFAULT NEXTVAL); DuckDB can't drop a
+							// depended-on sequence, so detach the column default, drop+recreate, then reattach.
+							"ALTER TABLE \"SequenceTest3\" ALTER COLUMN \"ID\" DROP DEFAULT",
+							"DROP SEQUENCE IF EXISTS sequencetestseq",
+							$"CREATE SEQUENCE sequencetestseq START {lastValue + 1}",
+							"ALTER TABLE \"SequenceTest3\" ALTER COLUMN \"ID\" SET DEFAULT NEXTVAL('SequenceTestSeq')",
+						};
+						break;
 				}
 			}
 
 			if (sql != null)
 			{
-				using (var db = new DataConnection(provider))
-				{
-					foreach (var query in sql)
-						db.Execute(query);
-				}
+				using var db = new DataConnection(provider);
+				foreach (var query in sql)
+					db.Execute(query);
 			}
 		}
 	}

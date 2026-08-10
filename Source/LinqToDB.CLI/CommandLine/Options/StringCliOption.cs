@@ -1,32 +1,35 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
 
-namespace LinqToDB.CommandLine
+using LinqToDB.CommandLine.Commands;
+
+namespace LinqToDB.CommandLine.Options
 {
 	/// <summary>
 	/// Arbitrary string (more or less) CLI option.
 	/// </summary>
 	/// <param name="Name">Option name (used with -- prefix).</param>
 	/// <param name="ShortName">Optional short name (used with - prefix).</param>
-	/// <param name="Required">When <c>true</c>, used requred to specify this option.</param>
-	/// <param name="AllowMultiple">When <c>true</c>, user can specify multiple values (separated by comma).</param>
+	/// <param name="Required">When <see langword="true"/>, used requred to specify this option.</param>
+	/// <param name="AllowMultiple">When <see langword="true"/>, user can specify multiple values (separated by comma).</param>
 	/// <param name="Help">Short help/description test for option.</param>
 	/// <param name="DetailedHelp">Optional detailed help for option.</param>
 	/// <param name="Examples">Optional list of option use examples.</param>
 	/// <param name="JsonExamples">Optional list of option use examples in JSON.</param>
-	/// <param name="Default">Optional default value (or values for <paramref name="AllowMultiple"/> set to <c>true</c>), used when user didn't specified option explicitly in default mode.</param>
-	/// <param name="T4Default">Optional default value (or values for <paramref name="AllowMultiple"/> set to <c>true</c>), used when user didn't specified option explicitly in T4-compat mode.</param>
+	/// <param name="Default">Optional default value (or values for <paramref name="AllowMultiple"/> set to <see langword="true"/>), used when user didn't specified option explicitly in default mode.</param>
+	/// <param name="T4Default">Optional default value (or values for <paramref name="AllowMultiple"/> set to <see langword="true"/>), used when user didn't specified option explicitly in T4-compat mode.</param>
 	internal sealed record StringCliOption(
 		string    Name,
 		char?     ShortName,
 		bool      Required,
 		bool      AllowMultiple,
 		string    Help,
-		string?   DetailedHelp,
-		string[]? Examples,
-		string[]? JsonExamples,
-		string[]? Default,
-		string[]? T4Default)
+		string?   DetailedHelp = null,
+		string[]? Examples     = null,
+		string[]? JsonExamples = null,
+		string[]? Default      = null,
+		string[]? T4Default    = null)
 		: CliOption(
 			Name,
 			ShortName,
@@ -71,6 +74,7 @@ namespace LinqToDB.CommandLine
 				}
 
 				errorDetails = null;
+
 				return values.ToArray();
 
 			}
@@ -84,6 +88,7 @@ namespace LinqToDB.CommandLine
 			}
 
 			errorDetails = $"string expected but got '{rawValue.ValueKind}'";
+
 			return null;
 		}
 	}

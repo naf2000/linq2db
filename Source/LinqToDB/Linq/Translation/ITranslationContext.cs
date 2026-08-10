@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq.Expressions;
 
 using LinqToDB.Internal.Expressions;
@@ -17,15 +17,18 @@ namespace LinqToDB.Linq.Translation
 			OrderBy  = 1 << 1,
 			Distinct = 1 << 2,
 
-			All = Filter | OrderBy | Distinct
+			All = Filter | OrderBy | Distinct,
 		}
 
 		public record OrderByInformation(Expression Expr, bool IsDescending, Sql.NullsPosition Nulls);
 
 		Expression Translate(Expression expression, TranslationFlags translationFlags = TranslationFlags.Sql);
 
-		MappingSchema MappingSchema { get; }
-		DataOptions   DataOptions   { get; }
+		MappingSchema            MappingSchema { get; }
+		DataOptions              DataOptions   { get; }
+
+		/// <summary>Read-only, translation-relevant subset of the provider's SQL flags (see <see cref="TranslationProviderFlags"/>).</summary>
+		TranslationProviderFlags ProviderFlags { get; }
 
 		ISqlExpressionFactory ExpressionFactory { get; }
 

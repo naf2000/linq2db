@@ -1,4 +1,6 @@
-﻿using LinqToDB.Data;
+using System.Diagnostics.CodeAnalysis;
+
+using LinqToDB.Data;
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.DataProvider;
 using LinqToDB.Internal.Options;
@@ -14,7 +16,7 @@ namespace LinqToDB.DataProvider.Ydb
 	/// </param>
 	/// <param name="UseParametrizedDecimal">
 	/// Use Decimal(p, s) type name instead of Decimal.
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	public sealed record YdbOptions(
 		BulkCopyType BulkCopyType     = BulkCopyType.ProviderSpecific,
@@ -36,7 +38,7 @@ namespace LinqToDB.DataProvider.Ydb
 
 		#region IEquatable implementation
 
-		public bool Equals(YdbOptions? other)
+		public bool Equals([NotNullWhen(true)] YdbOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

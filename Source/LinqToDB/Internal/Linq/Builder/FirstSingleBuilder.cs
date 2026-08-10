@@ -25,10 +25,10 @@ namespace LinqToDB.Internal.Linq.Builder
 	sealed class FirstSingleBuilder : MethodCallBuilder
 	{
 		public static bool CanBuildMethod(MethodCallExpression call)
-			=> call.IsQueryable() && call.Arguments.Count <= 2;
+			=> call is { IsQueryable: true, Arguments.Count: <= 2 };
 
 		public static bool CanBuildAsyncMethod(MethodCallExpression call)
-			=> call.IsAsyncExtension() && call.Arguments.Count <= 3;
+			=> call is { IsAsyncExtension: true, Arguments.Count: <= 3 };
 
 		public enum MethodKind
 		{
@@ -54,7 +54,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				nameof(AsyncExtensions.SingleOrDefaultAsync)             => MethodKind.SingleOrDefault,
 				nameof(LinqInternalExtensions.AssociationRecord)         => MethodKind.AssociationRecord,
 				nameof(LinqInternalExtensions.AssociationOptionalRecord) => MethodKind.AssociationOptionalRecord,
-				_ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, "Not supported method.")
+				_ => throw new ArgumentOutOfRangeException(nameof(methodName), methodName, "Not supported method."),
 			};
 		}
 
@@ -63,7 +63,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			var argument = methodCall.Arguments[0];
 			var argumentCount = methodCall.Arguments.Count;
 
-			if (methodCall.IsAsyncExtension())
+			if (methodCall.IsAsyncExtension)
 				--argumentCount;
 
 			var cardinality = buildInfo.SourceCardinality;
@@ -94,7 +94,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			var buildResult = builder.TryBuildSequence(new BuildInfo(buildInfo, argument)
 			{
-				SourceCardinality = cardinality
+				SourceCardinality = cardinality,
 			});
 
 			if (buildResult.BuildContext == null)
@@ -150,7 +150,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			var canBeWeak = false;
 
-			if (buildInfo.Parent != null && (cardinality & SourceCardinality.Zero) != 0)
+			if (buildInfo.Parent != null && cardinality.HasFlag(SourceCardinality.Zero))
 			{
 				sequence = new DefaultIfEmptyBuilder.DefaultIfEmptyContext(
 					buildInfo.Parent,
@@ -195,7 +195,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			public bool              CanBeWeak            { get; }
 			public SourceCardinality Cardinality          { get; set; }
 
-			public override bool IsOptional => (Cardinality & SourceCardinality.Zero) != 0 || Cardinality == SourceCardinality.Unknown;
+			public override bool IsOptional => Cardinality.HasFlag(SourceCardinality.Zero) || Cardinality == SourceCardinality.Unknown;
 
 			public override void SetRunQuery<T>(Query<T> query, Expression expr)
 			{
@@ -203,6 +203,11 @@ namespace LinqToDB.Internal.Linq.Builder
 
 				QueryRunner.SetRunQuery(query, mapper);
 
+				SetElementSelection(query);
+			}
+
+			public override void SetElementSelection<T>(Query<T> query)
+			{
 				switch (_methodKind)
 				{
 					case MethodKind.First           : GetFirstElement          (query); break;
@@ -303,7 +308,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				return new FirstSingleContext(null, context.CloneContext(Sequence),
 					_methodKind, IsSubQuery, IsAssociation, IsSubqueryExpression, CanBeWeak, Cardinality)
 				{
-					_isJoinCreated = _isJoinCreated
+					_isJoinCreated = _isJoinCreated,
 				};
 			}
 

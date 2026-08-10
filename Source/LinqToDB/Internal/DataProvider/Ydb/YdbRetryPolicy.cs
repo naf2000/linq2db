@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using LinqToDB.Data.RetryPolicy;
 
 namespace LinqToDB.Internal.DataProvider.Ydb
@@ -91,13 +91,13 @@ namespace LinqToDB.Internal.DataProvider.Ydb
 				return null;
 
 			// Mapping of status codes to jitter type — same as in the YDB SDK:
-			//  - BadSession/SessionBusy         -> 0ms
-			//  - Aborted/Undetermined           -> FullJitter (fast)
-			//  - Unavailable/ClientTransport*   -> EqualJitter (fast)
-			//  - Overloaded/ClientTransportRes* -> EqualJitter (slow)
+			//  - BadSession/SessionBusy/SessionExpired -> 0ms
+			//  - Aborted/Undetermined                  -> FullJitter (fast)
+			//  - Unavailable/ClientTransport*          -> EqualJitter (fast)
+			//  - Overloaded/ClientTransportRes*        -> EqualJitter (slow)
 			return code switch
 			{
-				"BadSession" or "SessionBusy"
+				"BadSession" or "SessionBusy" or "SessionExpired"
 					=> TimeSpan.Zero,
 
 				"Aborted" or "Undetermined"
@@ -109,7 +109,7 @@ namespace LinqToDB.Internal.DataProvider.Ydb
 				"Overloaded" or "ClientTransportResourceExhausted"
 					=> EqualJitter(_slowBackoffBaseMs, _slowCapBackoffMs, _slowCeiling, attempt),
 
-				_ => null
+				_ => null,
 			};
 		}
 

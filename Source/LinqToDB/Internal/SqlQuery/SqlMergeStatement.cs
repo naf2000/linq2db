@@ -17,6 +17,11 @@ namespace LinqToDB.Internal.SqlQuery
 			Target = new SqlTableSource(target, TargetAlias);
 		}
 
+		public SqlMergeStatement(ISqlTableSource target) : base(null)
+		{
+			Target = new SqlTableSource(target, TargetAlias);
+		}
+
 		internal SqlMergeStatement(
 			SqlWithClause?                       with,
 			string?                              hint,
@@ -43,7 +48,7 @@ namespace LinqToDB.Internal.SqlQuery
 		public List<SqlMergeOperationClause> Operations { get; private  set; } = new();
 		public SqlOutputClause?              Output     { get; set; }
 
-		public bool                          HasIdentityInsert => Operations.Any(o => o.OperationType == MergeOperationType.Insert && o.Items.Any(item => item.Column is SqlField { IsIdentity: true }));
+		public bool                          HasIdentityInsert => Operations.Exists(o => o.OperationType == MergeOperationType.Insert && o.Items.Exists(item => item.Column is SqlField { IsIdentity: true }));
 		public override QueryType            QueryType         => QueryType.Merge;
 		public override QueryElementType     ElementType       => QueryElementType.MergeStatement;
 

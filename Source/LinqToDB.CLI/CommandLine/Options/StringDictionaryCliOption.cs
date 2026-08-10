@@ -1,14 +1,17 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
 
-namespace LinqToDB.CommandLine
+using LinqToDB.CommandLine.Commands;
+
+namespace LinqToDB.CommandLine.Options
 {
 	/// <summary>
 	/// Name-value string dictionary CLI option.
 	/// </summary>
 	/// <param name="Name">Option name (used with -- prefix).</param>
 	/// <param name="ShortName">Optional short name (used with - prefix).</param>
-	/// <param name="Required">When <c>true</c>, used requred to specify this option.</param>
+	/// <param name="Required">When <see langword="true"/>, used requred to specify this option.</param>
 	/// <param name="Help">Short help/description test for option.</param>
 	/// <param name="DetailedHelp">Optional detailed help for option.</param>
 	/// <param name="Examples">Optional list of option use examples.</param>
@@ -36,7 +39,7 @@ namespace LinqToDB.CommandLine
 	{
 		public override object? ParseCommandLine(CliCommand command, string rawValue, out string? errorDetails)
 		{
-			var result = new Dictionary<string, string>();
+			var result = new Dictionary<string, string>(System.StringComparer.Ordinal);
 			foreach (var entry in rawValue.Split(','))
 			{
 				var parts = entry.Split('=');
@@ -57,6 +60,7 @@ namespace LinqToDB.CommandLine
 			}
 
 			errorDetails = null;
+
 			return result;
 		}
 
@@ -64,7 +68,7 @@ namespace LinqToDB.CommandLine
 		{
 			if (rawValue.ValueKind == JsonValueKind.Object)
 			{
-				var result = new Dictionary<string, string>();
+				var result = new Dictionary<string, string>(System.StringComparer.Ordinal);
 
 				foreach (var property in rawValue.EnumerateObject())
 				{
@@ -84,10 +88,12 @@ namespace LinqToDB.CommandLine
 				}
 
 				errorDetails = null;
+
 				return result;
 			}
 
 			errorDetails = $"object expected but got '{rawValue.ValueKind}'";
+
 			return null;
 		}
 	}

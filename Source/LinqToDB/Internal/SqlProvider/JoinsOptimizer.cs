@@ -4,6 +4,7 @@ using System.Linq;
 
 using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Internal.SqlQuery.Visitors;
+using LinqToDB.Mapping;
 
 namespace LinqToDB.Internal.SqlProvider
 {
@@ -41,11 +42,13 @@ namespace LinqToDB.Internal.SqlProvider
 		}
 
 		/// <summary>
-		/// Moves nested joins to upper level when outer join type is compatible with first nested join type.
+		/// Moves nested joins to upper level.
 		/// </summary>
-		public static void UnnestJoins(IQueryElement statement)
+		public static bool UnnestJoins(IQueryElement statement)
 		{
-			statement.Visit(static e =>
+			bool isModified = false;
+
+			statement.Visit(e =>
 			{
 				if (e is SqlTableSource source)
 				{
@@ -53,46 +56,111 @@ namespace LinqToDB.Internal.SqlProvider
 					{
 						var insertIndex = i + 1;
 						var parent      = source.Joins[i];
+						var childJoins  = parent.Table.Joins;
 
 						// INNER/LEFT join with nested joins
-						if (parent.Table.Joins.Count > 0 && parent.JoinType is JoinType.Inner or JoinType.Left)
+						if (childJoins.Count > 0 && parent.JoinType is JoinType.Inner or JoinType.Left)
 						{
-							var child = parent.Table.Joins[0];
+							if (!childJoins.TrueForAll(join => join.JoinType is JoinType.Inner or JoinType.Left or JoinType.CrossApply or JoinType.OuterApply))
+								continue;
 
-							// check compatibility of outer join with first nested join:
-							// INNER + INNER/LEFT/CROSS APPLY/OUTER APPLY
-							// LEFT + LEFT
-							if ((parent.JoinType == JoinType.Inner && (child.JoinType is JoinType.Inner or JoinType.Left or JoinType.CrossApply or JoinType.OuterApply)) ||
-								(parent.JoinType == JoinType.Left && child.JoinType == JoinType.Left))
+							for (var cj = childJoins.Count - 1; cj >= 0; cj--)
 							{
-								// check that join condition doesn't reference child tables
-								var sources = new HashSet<int>(parent.Table.Joins.SelectMany(j => j.Table.GetTables().Select(t => t.SourceID)));
-								var found = parent.Condition.Find(sources, static (sources, e) =>
+								var child = childJoins[cj];
+
+								var currentJoinSources = QueryHelper.EnumerateAccessibleSources(child.Table).ToList();
+								List<ISqlPredicate>? movedPredicates = null;
+								if (QueryHelper.IsDependsOnSources(parent.Condition, currentJoinSources))
 								{
-									if (e is ISqlExpression expr
-										&& GetUnderlyingFieldOrColumn(expr) is ISqlExpression field
-										&& sources.Contains(GetFieldSourceID(field)))
+									// for INNER+INNER we can move dependent predicates from parent to child condition
+									if (parent.JoinType is JoinType.Inner && child.JoinType is JoinType.Inner && !parent.Condition.IsOr)
 									{
-										return true;
+										movedPredicates = new();
+										for (var pi = parent.Condition.Predicates.Count - 1; pi >= 0; pi--)
+										{
+											var predicate = parent.Condition.Predicates[pi];
+											if (QueryHelper.IsDependsOnSources(predicate, currentJoinSources))
+												movedPredicates.Add(predicate);
+										}
+
+										if (movedPredicates.Count == 0)
+										{
+											continue;
+										}
 									}
+									else
+									{
+										continue;
+									}
+								}
 
-									return false;
-								});
+								if (parent.JoinType is JoinType.Left && child.JoinType is JoinType.Inner or JoinType.CrossApply)
+								{
+									var parentJoins = childJoins.ToList();
+									parentJoins.RemoveAt(cj);
 
-								if (found != null)
+									var sources = parentJoins
+										.SelectMany(join => QueryHelper.EnumerateAccessibleSources(join.Table))
+										.Concat([parent.Table.Source])
+										.ToList();
+
+									if (QueryHelper.IsDependsOnSources(child.Condition, sources))
+									{
+										continue;
+									}
+								}
+
+								// check if any remaining (not moved) sibling depends on this child's sources
+								var hasDependentSibling = false;
+								for (var k = cj + 1; k < childJoins.Count; k++)
+								{
+									if (QueryHelper.IsDependsOnSources(childJoins[k], currentJoinSources))
+									{
+										hasDependentSibling = true;
+										break;
+									}
+								}
+
+								if (hasDependentSibling)
 									continue;
 
+								if (parent.JoinType == JoinType.Left)
+								{
+									if (child.JoinType == JoinType.Inner)
+										child.JoinType = JoinType.Left;
+									else if (child.JoinType == JoinType.CrossApply)
+										child.JoinType = JoinType.OuterApply;
+								}
+
+								// move dependent predicates from parent condition to child condition
+								if (movedPredicates != null)
+								{
+									foreach (var predicate in movedPredicates)
+									{
+										parent.Condition.Predicates.Remove(predicate);
+										child.Condition.Predicates.Add(predicate);
+									}
+								}
+
 								// move all nested joins up
-								source.Joins.InsertRange(insertIndex, parent.Table.Joins);
-								parent.Table.Joins.Clear();
+								source.Joins.Insert(insertIndex, child);
+								parent.Table.Joins.RemoveAt(cj);
+
+								isModified = true;
 							}
 						}
 					}
 				}
 			});
+
+			return isModified;
 		}
 
-		public static void UndoNestedJoins(IQueryElement statement)
+		public static IQueryElement UndoNestedJoins(
+			IQueryElement                  statement,
+			SqlQueryColumnNestingCorrector columnNestingCorrector,
+			SqlQueryColumnOptimizerVisitor columnOptimizerVisitor,
+			MappingSchema                  mappingSchema)
 		{
 			var correct = false;
 			statement.Visit(e =>
@@ -128,9 +196,14 @@ namespace LinqToDB.Internal.SqlProvider
 
 			if (correct)
 			{
-				var corrector = new SqlQueryColumnNestingCorrector();
-				corrector.CorrectColumnNesting(statement);
+				// Derived tables minted here come after the optimizer's column pass: re-correct nesting and
+				// re-run column optimization so an unreferenced one is projected as SELECT 1, not SELECT *
+				// (which "could fail if there are columns with same name" — e.g. from the joined tables).
+				statement = columnNestingCorrector.CorrectColumnNesting(statement);
+				statement = columnOptimizerVisitor.OptimizeColumns(statement, mappingSchema);
 			}
+
+			return statement;
 		}
 
 		#region Helpers
@@ -156,6 +229,7 @@ namespace LinqToDB.Internal.SqlProvider
 			// check wether join used outside join itself
 			if (null != statement.FindExcept(join.Table.SourceID, join, static (sourceID, e) =>
 				(e is SqlField field && field.Table?.SourceID == sourceID) ||
+				(e is SqlCteTableField cteField && cteField.Table?.SourceID == sourceID) ||
 				(e is SqlColumn column && column.Parent?.SourceID == sourceID)))
 				return false;
 
@@ -207,7 +281,7 @@ namespace LinqToDB.Internal.SqlProvider
 
 		/// <summary>
 		/// Inspect join condition and return list of field pairs used in equals conditions between <paramref name="leftSource"/> (when specified) and <paramref name="rightJoin"/> tables.
-		/// If condition contains top-level OR operator, method returns <c>null</c>.
+		/// If condition contains top-level OR operator, method returns <see langword="null"/>.
 		/// </summary>
 		IReadOnlyList<EqualityFields>? SearchForJoinEqualityFields(SqlTableSource? leftSource, SqlJoinedTable rightJoin)
 		{
@@ -269,9 +343,10 @@ namespace LinqToDB.Internal.SqlProvider
 		{
 			return field switch
 			{
-				SqlField  sqlField  => sqlField .Table? .SourceID,
-				SqlColumn sqlColumn => sqlColumn.Parent?.SourceID,
-				_ => null
+				SqlField         sqlField      => sqlField     .Table? .SourceID,
+				SqlCteTableField cteTableField => cteTableField.Table? .SourceID,
+				SqlColumn        sqlColumn     => sqlColumn    .Parent?.SourceID,
+				_ => null,
 			} ?? -1;
 		}
 
@@ -320,7 +395,7 @@ namespace LinqToDB.Internal.SqlProvider
 				case QueryElementType.SqlExpression:
 				{
 					var sqlExpr = (SqlExpression)expr;
-					if (sqlExpr.Expr == "{0}" && sqlExpr.Parameters.Length == 1)
+					if (string.Equals(sqlExpr.Expr, "{0}", StringComparison.Ordinal) && sqlExpr.Parameters.Length == 1)
 						return GetUnderlyingFieldOrColumn(sqlExpr.Parameters[0]);
 					return null;
 				}
@@ -329,6 +404,7 @@ namespace LinqToDB.Internal.SqlProvider
 					return GetUnderlyingFieldOrColumn(((SqlNullabilityExpression)expr).SqlExpression);
 
 				case QueryElementType.SqlField:
+				case QueryElementType.SqlCteTableField:
 				case QueryElementType.Column:
 					return expr;
 			}

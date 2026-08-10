@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
 
@@ -47,15 +48,15 @@ namespace LinqToDB.Internal.Mapping
 			_typedDummySetter = _dummySetter.MakeGenericMethod(declaringType);
 		}
 
-		public bool Equals(SpecialPropertyInfo? other)
+		public bool Equals([NotNullWhen(true)] SpecialPropertyInfo? other)
 		{
 			if (other == null)
 				return false;
 
-			return ReferenceEquals(this, other) || Name.Equals(other.Name, StringComparison.Ordinal) && other.DeclaringType == DeclaringType;
+			return ReferenceEquals(this, other) || (Name.Equals(other.Name, StringComparison.Ordinal) && other.DeclaringType == DeclaringType);
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			if (obj is SpecialPropertyInfo dynamicColumnInfo)
 				return Equals(dynamicColumnInfo);

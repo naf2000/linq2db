@@ -3,9 +3,6 @@
 	<PropertyGroup>
 		<AssemblyName>linq2db.Scaffold</AssemblyName>
 		<RootNamespace>LinqToDB</RootNamespace>
-
-		<!--temporary till Feb.2026 SDK release-->
-		<RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
 	</PropertyGroup>
 
 	<PropertyGroup Label="Nuget">
@@ -21,7 +18,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\LinqToDB.Tools\LinqToDB.Tools.csproj" />
+		<ProjectReference Include="..\LinqToDB.Tools\LinqToDB.Tools.csproj" PrivateAssets="contentfiles;build" />
 
 		<PackageReference Include="Humanizer.Core" />
 

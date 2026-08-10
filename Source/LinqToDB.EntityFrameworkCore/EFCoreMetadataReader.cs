@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
@@ -34,13 +35,17 @@ using LinqToDB.SqlQuery;
 using LinqToDB.Expressions;
 using LinqToDB.Internal.Mapping;
 using LinqToDB.Internal.Extensions;
+using LinqToDB.Internal.Reflection;
+using LinqToDB.EntityFrameworkCore.Internal;
+
+using static LinqToDB.DataProvider.SqlServer.SqlFn;
 
 namespace LinqToDB.EntityFrameworkCore
 {
 	/// <summary>
 	/// LINQ To DB metadata reader for EF.Core model.
 	/// </summary>
-	internal sealed class EFCoreMetadataReader : IMetadataReader
+	internal sealed partial class EFCoreMetadataReader : IMetadataReader
 	{
 #if !EF31
 		// renamed in 8.0.0
@@ -58,6 +63,9 @@ namespace LinqToDB.EntityFrameworkCore
 		private readonly IMigrationsAnnotationProvider?                               _annotationProvider;
 #endif
 		private readonly ConcurrentDictionary<MemberInfo, Sql.ExpressionAttribute?>   _calculatedExtensions = new();
+#if !EF31
+		private readonly ConcurrentDictionary<Type, ManyToManyJoinInfo?>             _manyToManyJoins      = new();
+#endif
 #if !EF31
 		private readonly IDiagnosticsLogger<DbLoggerCategory.Query>?                  _logger;
 #endif
@@ -84,15 +92,25 @@ namespace LinqToDB.EntityFrameworkCore
 			}
 
 #if EF31
-			_objectId = FormattableString.Invariant($".{_model?.GetHashCode() ?? 0}.{_dependencies?.GetHashCode() ?? 0}.{_mappingSource?.GetHashCode() ?? 0}.{_annotationProvider?.GetHashCode() ?? 0}.");
+			_objectId = string.Create(CultureInfo.InvariantCulture, $".{_model?.GetHashCode() ?? 0}.{_dependencies?.GetHashCode() ?? 0}.{_mappingSource?.GetHashCode() ?? 0}.{_annotationProvider?.GetHashCode() ?? 0}.");
 #else
-			_objectId = FormattableString.Invariant($".{_model?.GetHashCode() ?? 0}.{_dependencies?.GetHashCode() ?? 0}.{_mappingSource?.GetHashCode() ?? 0}.{_annotationProvider?.GetHashCode() ?? 0}.{_logger?.GetHashCode() ?? 0}.");
+			_objectId = string.Create(CultureInfo.InvariantCulture, $".{_model?.GetHashCode() ?? 0}.{_dependencies?.GetHashCode() ?? 0}.{_mappingSource?.GetHashCode() ?? 0}.{_annotationProvider?.GetHashCode() ?? 0}.{_logger?.GetHashCode() ?? 0}.");
 #endif
 		}
 
 		public MappingAttribute[] GetAttributes(Type type)
 		{
 			List<MappingAttribute>? result = null;
+
+#if !EF31
+			// Many-to-many join table marker: emit the EF join table mapping.
+			var joinInfo = ResolveManyToManyJoin(type);
+			if (joinInfo != null)
+			{
+				var joinStoreId = GetStoreObjectIdentifier(joinInfo.JoinEntityType);
+				return [new TableAttribute() { Schema = joinStoreId?.Schema, Name = joinStoreId?.Name }];
+			}
+#endif
 
 			var et = _model?.FindEntityType(type);
 			if (et != null)
@@ -112,14 +130,14 @@ namespace LinqToDB.EntityFrameworkCore
 				foreach (var queryFilter in et.GetDeclaredQueryFilters())
 				{
 					if (queryFilter is { Expression: { } filter })
-						TransformFilter(filter);
+						TransformFilter(queryFilter.Key, filter);
 				}
 #else
 				if (et.GetQueryFilter() is { } filter)
-					TransformFilter(filter);
+					TransformFilter(null, filter);
 #endif
 
-				void TransformFilter(LambdaExpression filter)
+				void TransformFilter(string? filterKey, LambdaExpression filter)
 				{
 					var dcParam     = Expression.Parameter(typeof(IDataContext), "dc");
 					var contextProp = Expression.Property(Expression.Convert(dcParam, typeof(LinqToDBForEFToolsDataConnection)), "Context");
@@ -138,7 +156,7 @@ namespace LinqToDB.EntityFrameworkCore
 
 					var newFilter = Expression.Lambda(filterBody, filter.Parameters[0], dcParam);
 
-					result.Add(new QueryFilterAttribute() { FilterLambda = newFilter });
+					result.Add(new QueryFilterAttribute() { FilterKey = filterKey, FilterLambda = newFilter });
 				}
 
 				// InheritanceMappingAttribute
@@ -181,7 +199,7 @@ namespace LinqToDB.EntityFrameworkCore
 						(inheritanceAttributes ??= new()).Add(entity.ClrType, new()
 						{
 							Type = entity.ClrType,
-							Code = entity.GetDiscriminatorValue()
+							Code = entity.GetDiscriminatorValue(),
 						});
 
 						if (entity.BaseType == null)
@@ -204,8 +222,7 @@ namespace LinqToDB.EntityFrameworkCore
 				return false;
 
 			if (memberInfo.DeclaringType?.IsAssignableFrom(property.DeclaringType) == true
-				&& memberInfo.Name == property.Name
-				&& memberInfo.MemberType == property.MemberType
+				&& string.Equals(memberInfo.Name, property.Name, StringComparison.Ordinal) && memberInfo.MemberType == property.MemberType
 				&& memberInfo.GetMemberType() == property.GetMemberType())
 			{
 				return true;
@@ -250,7 +267,7 @@ namespace LinqToDB.EntityFrameworkCore
 				DbType.UInt64                => DataType.UInt64,
 				DbType.VarNumeric            => DataType.VarNumeric,
 				DbType.Xml                   => DataType.Xml,
-				_                            => DataType.Undefined
+				_                            => DataType.Undefined,
 			};
 		}
 
@@ -258,6 +275,21 @@ namespace LinqToDB.EntityFrameworkCore
 		{
 			if (typeof(Expression).IsSameOrParentOf(type))
 				return [];
+
+#if !EF31
+			// Many-to-many join table marker: expose foreign key columns as dynamic columns.
+			var markerJoinInfo = ResolveManyToManyJoin(type);
+			if (markerJoinInfo != null)
+			{
+				if (memberInfo is DynamicColumnInfo)
+				{
+					var ca = BuildJoinColumnAttribute(markerJoinInfo, memberInfo.Name);
+					return ca != null ? [ca] : [];
+				}
+
+				return [];
+			}
+#endif
 
 			List<MappingAttribute>? result = null;
 			var hasColumn = false;
@@ -311,7 +343,7 @@ namespace LinqToDB.EntityFrameworkCore
 						if (prop.FindColumn(storeObjectId.Value) is IColumn column)
 							annotations = annotations.Concat(_annotationProvider.For(column, false));
 
-						if (_annotationProvider.GetType().Name == "SqliteAnnotationProvider")
+						if (string.Equals(_annotationProvider.GetType().Name, "SqliteAnnotationProvider", StringComparison.Ordinal))
 						{
 							// copy-paste logic, not available anymore in v8
 							// https://github.com/dotnet/efcore/blob/release/8.0/src/EFCore.Sqlite.Core/Metadata/Internal/SqliteAnnotationProvider.cs#L70-L75
@@ -335,18 +367,21 @@ namespace LinqToDB.EntityFrameworkCore
 #endif
 						.Any(static a =>
 						{
-							if (a.Name.EndsWith(":ValueGenerationStrategy"))
-								return a.Value != null && string.Format(CultureInfo.InvariantCulture, "{0}", a.Value).Contains("Identity");
+							if (a.Name.EndsWith(":ValueGenerationStrategy", StringComparison.Ordinal))
+								return a.Value != null && string.Create(CultureInfo.InvariantCulture, $"{a.Value}").Contains("Identity", StringComparison.Ordinal);
 
-							if (a.Name.EndsWith(":Autoincrement"))
+							if (a.Name.EndsWith(":Autoincrement", StringComparison.Ordinal))
 								return a.Value is bool b && b;
 
-							// for postgres
-							if (a.Name == "Relational:DefaultValueSql")
+							// sequence generators
+							if (string.Equals(a.Name, "Relational:DefaultValueSql", StringComparison.Ordinal))
 							{
 								if (a.Value is string str)
 								{
-									return str.Contains("nextval", StringComparison.InvariantCultureIgnoreCase);
+									// for postgres
+									return str.Contains("nextval", StringComparison.OrdinalIgnoreCase)
+										// for sqlserver
+										|| str.Contains("NEXT VALUE FOR", StringComparison.OrdinalIgnoreCase);
 								}
 							}
 
@@ -390,7 +425,7 @@ namespace LinqToDB.EntityFrameworkCore
 						IsIdentity      = isIdentity,
 						IsDiscriminator = discriminator == prop,
 						SkipOnInsert    = skipOnInsert,
-						SkipOnUpdate    = skipOnUpdate
+						SkipOnUpdate    = skipOnUpdate,
 					};
 
 					var maxLen = prop.GetMaxLength();
@@ -405,7 +440,7 @@ namespace LinqToDB.EntityFrameworkCore
 					{
 						var valueConverterAttribute = new ValueConverterAttribute()
 						{
-							ValueConverter = new ValueConverter(converter.ConvertToProviderExpression, converter.ConvertFromProviderExpression, false)
+							ValueConverter = new ValueConverter(converter.ConvertToProviderExpression, converter.ConvertFromProviderExpression, false),
 						};
 
 						result.Add(valueConverterAttribute);
@@ -424,8 +459,8 @@ namespace LinqToDB.EntityFrameworkCore
 						if (!navigation.IsDependentToPrincipal())
 #endif
 						{
-							var thisKey  = string.Join(",", fk.PrincipalKey.Properties.Select(static p => p.Name));
-							var otherKey = string.Join(",", fk.Properties.Select(static p => p.Name));
+							var thisKey  = string.JoinStrings(',', fk.PrincipalKey.Properties.Select(static p => p.Name));
+							var otherKey = string.JoinStrings(',', fk.Properties.Select(static p => p.Name));
 							(result ??= new()).Add(new AssociationAttribute()
 							{
 								ThisKey   = thisKey,
@@ -434,23 +469,40 @@ namespace LinqToDB.EntityFrameworkCore
 								CanBeNull = !fk.IsRequiredDependent,
 #else
 								// Could not track when EF decides to do INNER JOIN
-								CanBeNull = true
+								CanBeNull = true,
 #endif
 							});
 						}
 						else
 						{
-							var thisKey  = string.Join(",", fk.Properties.Select(static p => p.Name));
-							var otherKey = string.Join(",", fk.PrincipalKey.Properties.Select(static p => p.Name));
+							var thisKey  = string.JoinStrings(',', fk.Properties.Select(static p => p.Name));
+							var otherKey = string.JoinStrings(',', fk.PrincipalKey.Properties.Select(static p => p.Name));
 							(result ??= new()).Add(new AssociationAttribute()
 							{
 								ThisKey   = thisKey,
 								OtherKey  = otherKey,
-								CanBeNull = !fk.IsRequired
+								CanBeNull = !fk.IsRequired,
 							});
 						}
 					}
 				}
+
+#if !EF31
+				// AssociationAttribute for many-to-many (skip) navigations.
+				// EF represents these via a hidden join entity, so we build a query expression
+				// that joins through it (see BuildManyToManyQueryExpression).
+				foreach (var skipNavigation in et.GetSkipNavigations())
+				{
+					if (CompareProperty(skipNavigation.PropertyInfo, memberInfo))
+					{
+						(result ??= new()).Add(new AssociationAttribute()
+						{
+							QueryExpression = BuildManyToManyQueryExpression(et, skipNavigation),
+							CanBeNull       = true,
+						});
+					}
+				}
+#endif
 			}
 
 			if (!hasColumn)
@@ -470,14 +522,14 @@ namespace LinqToDB.EntityFrameworkCore
 			// Sql.ExpressionAttribute
 			if (_dependencies != null)
 			{
-				if (memberInfo.IsMethodEx())
+				if (memberInfo.IsMethod)
 				{
 					var methodInfo = (MethodInfo) memberInfo;
 					var func = GetDbFunctionFromMethodCall(type, methodInfo);
 					if (func != null)
 						(result ??= new()).Add(func);
 				}
-				else if (memberInfo.IsPropertyEx())
+				else if (memberInfo.IsProperty)
 				{
 					var propertyInfo = (PropertyInfo) memberInfo;
 					var func = GetDbFunctionFromProperty(type, propertyInfo);
@@ -487,7 +539,7 @@ namespace LinqToDB.EntityFrameworkCore
 			}
 
 			// Sql.FunctionAttribute
-			if (memberInfo.IsMethodEx())
+			if (memberInfo.IsMethod)
 			{
 				var method = (MethodInfo) memberInfo;
 
@@ -496,7 +548,7 @@ namespace LinqToDB.EntityFrameworkCore
 					(result ??= new()).Add(new Sql.FunctionAttribute()
 					{
 						Name           = func.Name,
-						ServerSideOnly = true
+						ServerSideOnly = true,
 					});
 
 				var functionAttribute = memberInfo.GetAttribute<DbFunctionAttribute>();
@@ -550,7 +602,7 @@ namespace LinqToDB.EntityFrameworkCore
 			}
 
 #if !EF31 && !EF8
-			private static readonly ConstructorInfo _ctor = typeof(SqlTransparentExpression).GetConstructor([typeof(ExceptExpression), typeof(RelationalTypeMapping)])
+			private static readonly ConstructorInfo _ctor = typeof(SqlTransparentExpression).GetConstructor([typeof(ConstantExpression), typeof(RelationalTypeMapping)])
 				?? throw new InvalidOperationException();
 
 			private static readonly MethodInfo _constantExpressionFactoryMethod = typeof(Expression).GetMethod(nameof(Constant), [typeof(object), typeof(Type)])
@@ -573,7 +625,7 @@ namespace LinqToDB.EntityFrameworkCore
 				return ReferenceEquals(this, other);
 			}
 
-			public override bool Equals(object? obj)
+			public override bool Equals([NotNullWhen(true)] object? obj)
 			{
 				if (obj is null) return false;
 				if (ReferenceEquals(this, obj)) return true;
@@ -654,7 +706,7 @@ namespace LinqToDB.EntityFrameworkCore
 
 #if !EF31
 						// https://github.com/PomeloFoundation/Pomelo.EntityFrameworkCore.MySql/issues/1801
-						if (ctx.this_._dependencies!.MethodCallTranslatorProvider.GetType().Name == "MySqlMethodCallTranslatorProvider")
+						if (string.Equals(ctx.this_._dependencies!.MethodCallTranslatorProvider.GetType().Name, "MySqlMethodCallTranslatorProvider", StringComparison.Ordinal))
 						{
 							var contextProperty = ctx.this_._dependencies!.MethodCallTranslatorProvider.GetType().GetProperty("QueryCompilationContext")
 							?? throw new InvalidOperationException("MySqlMethodCallTranslatorProvider.QueryCompilationContext property not found");
@@ -701,7 +753,7 @@ namespace LinqToDB.EntityFrameworkCore
 				Sql.ExpressionAttribute? result = null;
 
 				if ((ctx.propInfo.GetMethod?.IsStatic != true)
-					&& !(mi is DynamicColumnInfo)
+					&& mi is not DynamicColumnInfo
 					&& !mi.HasAttribute<Sql.ExpressionAttribute>())
 				{
 					var objExpr = new SqlTransparentExpression(Expression.Constant(DefaultValue.GetValue(ctx.type), ctx.type), ctx.this_._mappingSource?.FindMapping(ctx.propInfo));
@@ -711,6 +763,7 @@ namespace LinqToDB.EntityFrameworkCore
 #else
 					var newExpression = ctx.this_._dependencies!.MemberTranslatorProvider.Translate(objExpr, ctx.propInfo, ctx.propInfo.GetMemberType());
 #endif
+
 					if (newExpression?.Equals(objExpr) == false)
 					{
 						var parametersArray = new Expression[] { objExpr };
@@ -755,7 +808,7 @@ namespace LinqToDB.EntityFrameworkCore
 				}
 
 				if (idx >= 0)
-					return FormattableString.Invariant($"{{{idx}}}");
+					return string.Create(CultureInfo.InvariantCulture, $"{{{idx}}}");
 
 				if (expr is SqlFragmentExpression fragment)
 					return fragment.Sql;
@@ -801,7 +854,7 @@ namespace LinqToDB.EntityFrameworkCore
 					return text;
 				}
 #else
-				if (newExpression.GetType().Name == PgBinaryExpressionName)
+				if (string.Equals(newExpression.GetType().Name, PgBinaryExpressionName, StringComparison.Ordinal))
 				{
 					// Handling Npgsql PgBinaryExpression
 
@@ -813,12 +866,10 @@ namespace LinqToDB.EntityFrameworkCore
 					var operandExpr = operand switch
 					{
 						"Contains"
-							when left.Type.Name == "NpgsqlInetTypeMapping" ||
-								 left.Type.Name == "NpgsqlCidrTypeMapping"
+							when left.Type.Name is "NpgsqlInetTypeMapping" or "NpgsqlCidrTypeMapping"
 							=> ">>",
 						"ContainedBy"
-							when left.Type.Name == "NpgsqlInetTypeMapping" ||
-								 left.Type.Name == "NpgsqlCidrTypeMapping"
+							when left.Type.Name is "NpgsqlInetTypeMapping" or "NpgsqlCidrTypeMapping"
 							=> "<<",
 						"Contains"                      => "@>",
 						"ContainedBy"                   => "<@",
@@ -841,7 +892,7 @@ namespace LinqToDB.EntityFrameworkCore
 						"JsonExists"                    => "?",
 						"JsonExistsAny"                 => "?|",
 						"JsonExistsAll"                 => "?&",
-						_ => throw new InvalidOperationException($"Unknown {PgBinaryExpressionName}.OperatorType: '{operand}'")
+						_ => throw new InvalidOperationException($"Unknown {PgBinaryExpressionName}.OperatorType: '{operand}'"),
 					};
 
 					switch (operand)
@@ -876,11 +927,10 @@ namespace LinqToDB.EntityFrameworkCore
 
 		private static Expression UnwrapConverted(Expression expr)
 		{
-			if (expr is SqlFunctionExpression func)
+			if (expr is SqlFunctionExpression { Arguments: [var arg, { NodeType: ExpressionType.Extension }], Name: var name }
+				&& string.Equals(name, "COALESCE", StringComparison.OrdinalIgnoreCase))
 			{
-				if (string.Equals(func.Name, "COALESCE", StringComparison.InvariantCultureIgnoreCase) &&
-					func.Arguments?.Count == 2 && func.Arguments[1].NodeType == ExpressionType.Extension)
-					return UnwrapConverted(func.Arguments[0]);
+				return UnwrapConverted(arg);
 			}
 
 			return expr;
@@ -888,6 +938,22 @@ namespace LinqToDB.EntityFrameworkCore
 
 		public MemberInfo[] GetDynamicColumns(Type type)
 		{
+#if !EF31
+			var joinInfo = ResolveManyToManyJoin(type);
+			if (joinInfo != null)
+			{
+				var columns = new List<MemberInfo>();
+
+				foreach (var p in joinInfo.ThisForeignKey.Properties)
+					columns.Add(new DynamicColumnInfo(type, p.ClrType, p.Name));
+
+				foreach (var p in joinInfo.OtherForeignKey.Properties)
+					columns.Add(new DynamicColumnInfo(type, p.ClrType, p.Name));
+
+				return columns.ToArray();
+			}
+#endif
+
 			return [];
 		}
 

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Data.Common;
-using System.IO;
 
 using LinqToDB.Data;
 using LinqToDB.DataProvider;
@@ -31,11 +30,11 @@ namespace LinqToDB.Internal.DataProvider.Informix
 				case DB2ProviderAdapter.CoreClientNamespace    :
 
 					// this check used by both Informix and DB2 providers to avoid conflicts
-					if (options.ConfigurationString?.Contains("Informix") == true)
+					if (options.ConfigurationString?.Contains("Informix", StringComparison.Ordinal) == true)
 						goto case ProviderName.Informix;
 					break;
 				case ProviderName.Informix:
-					if (options.ConfigurationString?.Contains("DB2") == true)
+					if (options.ConfigurationString?.Contains("DB2", StringComparison.Ordinal) == true)
 						return _informixDB2DataProvider.Value;
 
 #if NETFRAMEWORK
@@ -85,26 +84,20 @@ namespace LinqToDB.Internal.DataProvider.Informix
 					return InformixProvider.Informix;
 
 				default:
-					if (options.ConfigurationString?.Contains("DB2") == true)
+					if (options.ConfigurationString?.Contains("DB2", StringComparison.Ordinal) == true)
 						return InformixProvider.DB2;
 
 					break;
 			}
 
-			var fileName = typeof(InformixProviderDetector).Assembly.GetFileName();
-			var dirName  = Path.GetDirectoryName(fileName);
-
-			return File.Exists(Path.Combine(dirName ?? ".", InformixProviderAdapter.IfxAssemblyName + ".dll"))
+			return Common.Tools.IsProviderAssemblyPresent(InformixProviderAdapter.IfxAssemblyName)
 				? InformixProvider.Informix
-				: File.Exists(Path.Combine(dirName ?? ".", DB2ProviderAdapter.AssemblyName + ".dll"))
 #if !NETFRAMEWORK
-					|| File.Exists(Path.Combine(dirName ?? ".", DB2ProviderAdapter.AssemblyNameOld + ".dll"))
-#endif
-					? InformixProvider.DB2
-#if NETFRAMEWORK
-					: InformixProvider.Informix;
+				: InformixProvider.DB2;
 #else
-					: InformixProvider.DB2;
+				: Common.Tools.IsProviderAssemblyPresent(DB2ProviderAdapter.AssemblyName)
+					? InformixProvider.DB2
+					: InformixProvider.Informix;
 #endif
 		}
 	}

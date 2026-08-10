@@ -1,18 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Reflection;
-using System.Threading;
 using System.Threading.Tasks;
 
 using LinqToDB;
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.Expressions;
-using LinqToDB.Internal.Extensions;
-using LinqToDB.Internal.SqlQuery;
-using LinqToDB.SqlQuery;
 
 namespace LinqToDB.Internal.Linq.Builder
 {
@@ -20,11 +14,11 @@ namespace LinqToDB.Internal.Linq.Builder
 	sealed class AggregationBuilder : MethodCallBuilder
 	{
 		public static bool CanBuildMethod(MethodCallExpression call)
-			=> call.IsQueryable();
+			=> call.IsQueryable;
 
 		public static Expression BuildAggregateExecuteExpression(MethodCallExpression methodCall)
 		{
-			if (methodCall == null) throw new ArgumentNullException(nameof(methodCall));
+			ArgumentNullException.ThrowIfNull(methodCall);
 
 			var elementType = TypeHelper.GetEnumerableElementType(methodCall.Arguments[0].Type);
 			var sourceParam = Expression.Parameter(typeof(IEnumerable<>).MakeGenericType(elementType), "source");

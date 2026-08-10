@@ -22,10 +22,10 @@ namespace Tests.Linq
 		[Test]
 		public void Contains1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where new[] { 1, 2 }.Contains(p.ParentID) select p,
-					from p in db.Parent where new[] { 1, 2 }.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where new[] { 1, 2 }.Contains(p.ParentID) select p,
+				from p in db.Parent where new[] { 1, 2 }.Contains(p.ParentID) select p);
 		}
 
 		[Test]
@@ -33,10 +33,10 @@ namespace Tests.Linq
 		{
 			var arr = new[] { 1, 2 };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Contains(p.ParentID) select p);
 		}
 
 		[Test]
@@ -44,15 +44,15 @@ namespace Tests.Linq
 		{
 			var n = 2;
 
-			using (var data = GetDataContext(context))
-				AreEqual(
-					from p in Parent
+			using var data = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				where new[] { 1, n }.Contains(p.ParentID)
+				select p,
+				CompiledQuery.Compile<ITestDataContext, IQueryable<Parent>>(db =>
+					from p in db.Parent
 					where new[] { 1, n }.Contains(p.ParentID)
-					select p,
-					CompiledQuery.Compile<ITestDataContext, IQueryable<Parent>>(db =>
-						from p in db.Parent
-						where new[] { 1, n }.Contains(p.ParentID)
-						select p)(data));
+					select p)(data));
 		}
 
 		[Test]
@@ -60,15 +60,15 @@ namespace Tests.Linq
 		{
 			var arr = new[] { 1, 2 };
 
-			using (var data = GetDataContext(context))
-				AreEqual(
-					from p in Parent
+			using var data = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				where arr.Contains(p.ParentID)
+				select p,
+				CompiledQuery.Compile<ITestDataContext, IQueryable<Parent>>(db =>
+					from p in db.Parent
 					where arr.Contains(p.ParentID)
-					select p,
-					CompiledQuery.Compile<ITestDataContext,IQueryable<Parent>>(db =>
-						from p in db.Parent
-						where arr.Contains(p.ParentID)
-						select p)(data));
+					select p)(data));
 		}
 
 		[Test]
@@ -80,16 +80,14 @@ namespace Tests.Linq
 			var expected1 = from p in Parent where arr1.Contains(p.ParentID) select p;
 			var expected2 = from p in Parent where arr2.Contains(p.ParentID) select p;
 
-			using (var data = GetDataContext(context))
-			{
-				var cq = CompiledQuery.Compile<ITestDataContext,int[],IQueryable<Parent>>((db,a) =>
+			using var data = GetDataContext(context);
+			var cq = CompiledQuery.Compile<ITestDataContext,int[],IQueryable<Parent>>((db,a) =>
 					from p in db.Parent
 					where a.Contains(p.ParentID)
 					select p);
 
-				AreEqual(expected1, cq(data, arr1));
-				AreEqual(expected2, cq(data, arr2));
-			}
+			AreEqual(expected1, cq(data, arr1));
+			AreEqual(expected2, cq(data, arr2));
 		}
 
 		[Test]
@@ -97,10 +95,10 @@ namespace Tests.Linq
 		{
 			var arr = new List<int> { 1, 2 };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Contains(p.ParentID) select p);
 		}
 
 		[Test]
@@ -108,10 +106,10 @@ namespace Tests.Linq
 		{
 			IEnumerable<int> arr = new[] { 1, 2 };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Contains(p.ParentID) select p);
 		}
 
 		[Test]
@@ -123,11 +121,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Keys.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
+				from p in Parent where arr.Keys.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -140,10 +138,10 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.ContainsKey(p.ParentID) select p,
-					from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.ContainsKey(p.ParentID) select p,
+				from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
 		}
 
 		[Test]
@@ -155,11 +153,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Values.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
+				from p in Parent where arr.Values.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -172,10 +170,10 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.ContainsValue(p.ParentID) select p,
-					from p in db.Parent where arr.ContainsValue(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.ContainsValue(p.ParentID) select p,
+				from p in db.Parent where arr.ContainsValue(p.ParentID) select p);
 		}
 
 		[Test]
@@ -187,11 +185,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Keys.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
+				from p in Parent where arr.Keys.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -204,10 +202,10 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.ContainsKey(p.ParentID) select p,
-					from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.ContainsKey(p.ParentID) select p,
+				from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
 		}
 
 		[Test]
@@ -219,11 +217,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Values.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
+				from p in Parent where arr.Values.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -236,11 +234,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Keys.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
+				from p in Parent where arr.Keys.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Keys.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -253,10 +251,10 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.ContainsKey(p.ParentID) select p,
-					from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.ContainsKey(p.ParentID) select p,
+				from p in db.Parent where arr.ContainsKey(p.ParentID) select p);
 		}
 
 		[Test]
@@ -268,11 +266,11 @@ namespace Tests.Linq
 				{ 2, 2 },
 			};
 
-			using (var db = GetDataContext(context))
-				AreEqual(
+			using var db = GetDataContext(context);
+			AreEqual(
 #pragma warning disable CA1841 // Prefer Dictionary.Contains methods : suppressed as we test this method
-					from p in    Parent where arr.Values.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
+				from p in Parent where arr.Values.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Values.Contains(p.ParentID) select p);
 #pragma warning restore CA1841 // Prefer Dictionary.Contains methods
 		}
 
@@ -281,10 +279,10 @@ namespace Tests.Linq
 		{
 			var arr = new HashSet<int> { 1, 2 };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Contains(p.ParentID) select p);
 		}
 
 #if NET8_0_OR_GREATER
@@ -293,24 +291,24 @@ namespace Tests.Linq
 		{
 			IReadOnlySet<int> arr = new HashSet<int> { 1, 2 };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where arr.Contains(p.ParentID) select p,
-					from p in db.Parent where arr.Contains(p.ParentID) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where arr.Contains(p.ParentID) select p,
+				from p in db.Parent where arr.Contains(p.ParentID) select p);
 		}
 #endif
 
 		[Test]
 		public void EmptyContains1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in Parent
-					where Array.Empty<int>().Contains(p.ParentID) || p.ParentID == 2
-					select p,
-					from p in db.Parent
-					where Array.Empty<int>().Contains(p.ParentID) || p.ParentID == 2
-					select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				where Array.Empty<int>().Contains(p.ParentID) || p.ParentID == 2
+				select p,
+				from p in db.Parent
+				where Array.Empty<int>().Contains(p.ParentID) || p.ParentID == 2
+				select p);
 		}
 
 		[Test]
@@ -318,10 +316,10 @@ namespace Tests.Linq
 		{
 			var arr = new List<string> { "John" };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where arr.Contains(p.FirstName) select p,
-					from p in db.Person where arr.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where arr.Contains(p.FirstName) select p,
+				from p in db.Person where arr.Contains(p.FirstName) select p);
 		}
 
 		[Test]
@@ -329,19 +327,19 @@ namespace Tests.Linq
 		{
 			var nm = "John";
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where new List<string> { nm }.Contains(p.FirstName) select p,
-					from p in db.Person where new List<string> { nm }.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where new List<string> { nm }.Contains(p.FirstName) select p,
+				from p in db.Person where new List<string> { nm }.Contains(p.FirstName) select p);
 		}
 
 		[Test]
 		public void ContainsString13([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where new List<string> { "John" }.Contains(p.FirstName) select p,
-					from p in db.Person where new List<string> { "John" }.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where new List<string> { "John" }.Contains(p.FirstName) select p,
+				from p in db.Person where new List<string> { "John" }.Contains(p.FirstName) select p);
 		}
 
 		[Test]
@@ -349,10 +347,10 @@ namespace Tests.Linq
 		{
 			var arr = new[] { "John" };
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where arr.Contains(p.FirstName) select p,
-					from p in db.Person where arr.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where arr.Contains(p.FirstName) select p,
+				from p in db.Person where arr.Contains(p.FirstName) select p);
 		}
 
 		[Test]
@@ -360,28 +358,28 @@ namespace Tests.Linq
 		{
 			var nm = "John";
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where new[] { nm }.Contains(p.FirstName) select p,
-					from p in db.Person where new[] { nm }.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where new[] { nm }.Contains(p.FirstName) select p,
+				from p in db.Person where new[] { nm }.Contains(p.FirstName) select p);
 		}
 
 		[Test]
 		public void ContainsString23([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where new[] { "John" }.Contains(p.FirstName) select p,
-					from p in db.Person where new[] { "John" }.Contains(p.FirstName) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Person where new[] { "John" }.Contains(p.FirstName) select p,
+				from p in db.Person where new[] { "John" }.Contains(p.FirstName) select p);
 		}
 
 		[Test]
 		public void Equals1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where p.ParentID.Equals(2) select p,
-					from p in db.Parent where p.ParentID.Equals(2) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where p.ParentID.Equals(2) select p,
+				from p in db.Parent where p.ParentID.Equals(2) select p);
 		}
 
 		[Test]
@@ -389,38 +387,36 @@ namespace Tests.Linq
 		{
 			var child = (from ch in Child where ch.ParentID == 2 select ch).First();
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from ch in    Child where !ch.Equals(child) select ch,
-					from ch in db.Child where !ch.Equals(child) select ch);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from ch in Child where !ch.Equals(child) select ch,
+				from ch in db.Child where !ch.Equals(child) select ch);
 		}
 
 		[Test]
 		public void Equals3([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where p.Value1.Equals(null) select p,
-					from p in db.Parent where p.Value1.Equals(null) select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where p.Value1.Equals(null) select p,
+				from p in db.Parent where p.Value1.Equals(null) select p);
 		}
 
 		[Test]
 		public void Equals4([NorthwindDataContext] string context)
 		{
-			using (var db = new NorthwindDB(context))
-			{
-				var dd = GetNorthwindAsList(context);
-				AreEqual(
-					dd.Customer.Where(c => !c.Address!.Equals(null)),
-					db.Customer.Where(c => !c.Address!.Equals(null)));
-			}
+			using var db = new NorthwindDB(context);
+			var dd = GetNorthwindAsList(context);
+			AreEqual(
+				dd.Customer.Where(c => !c.Address!.Equals(null)),
+				db.Customer.Where(c => !c.Address!.Equals(null)));
 		}
 
 		[Test]
 		public void NewGuid1(
 			[DataSources(
 				ProviderName.DB2,
-				ProviderName.Ydb,
+				TestProvName.AllYdb,
 				TestProvName.AllInformix,
 				TestProvName.AllPostgreSQL12Minus,
 				TestProvName.AllSQLite,
@@ -428,10 +424,10 @@ namespace Tests.Linq
 				TestProvName.AllAccess)]
 			string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Types where p.GuidValue != Sql.NewGuid() select p.GuidValue,
-					from p in db.Types where p.GuidValue != Sql.NewGuid() select p.GuidValue);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Types where p.GuidValue != Sql.NewGuid() select p.GuidValue,
+				from p in db.Types where p.GuidValue != Sql.NewGuid() select p.GuidValue);
 		}
 
 		[Test]
@@ -443,15 +439,15 @@ namespace Tests.Linq
 				TestProvName.AllAccess)]
 			string context)
 		{
-			using (var db = GetDataContext(context))
-				Assert.That((from p in db.Types select Sql.NewGuid()).First(), Is.Not.EqualTo(Guid.Empty));
+			using var db = GetDataContext(context);
+			Assert.That((from p in db.Types select Sql.NewGuid()).First(), Is.Not.EqualTo(Guid.Empty));
 		}
 
 		[Test]
 		public void NewGuidOrder(
 			[DataSources(false,
 				ProviderName.DB2,
-				ProviderName.Ydb,
+				TestProvName.AllYdb,
 				TestProvName.AllInformix,
 				TestProvName.AllPostgreSQL,
 				TestProvName.AllSQLite,
@@ -470,31 +466,91 @@ namespace Tests.Linq
 			Assert.That(db.LastQuery, Does.Contain("ORDER"));
 		}
 
+		// Version nibble of a GUID is the first hex digit of its third group (canonical layout),
+		// i.e. index 12 of the dash-less "N" form. Works on every TFM (Guid.Version is net9+ only).
+		static int GuidVersion(Guid guid) => Convert.ToInt32(guid.ToString("N").Substring(12, 1), 16);
+
+		// Providers with a native server-side UUIDv7 generator. Sql.AsSql forces the value into SQL,
+		// so the emitted function call is deterministic and the baseline captures it — that baseline
+		// is the SQL-generation assertion that the right server function is used. The returned value
+		// itself is non-deterministic, so only its version is asserted.
+		[Test]
+		public void NewGuid7_Native([IncludeDataSources(true, TestProvName.AllClickHouse, TestProvName.AllDuckDB, TestProvName.AllMariaDB, TestProvName.AllPostgreSQL18Plus)] string context)
+		{
+			using var db = GetDataContext(context);
+
+			var guid = (from p in db.Types select Sql.AsSql(Sql.NewGuid7())).First();
+
+			Assert.That(guid, Is.Not.EqualTo(Guid.Empty));
+			Assert.That(GuidVersion(guid), Is.EqualTo(7));
+		}
+
+		// Providers without a native generator fall back to client-side generation, embedding a
+		// random literal in the SQL — non-deterministic, so the baseline is disabled.
+		[Test]
+		public void NewGuid7_Emulated([DataSources(TestProvName.AllClickHouse, TestProvName.AllDuckDB, TestProvName.AllMariaDB, TestProvName.AllPostgreSQL18Plus)] string context)
+		{
+			using (new DisableBaseline("Non-deterministic UUIDv7 value"))
+			using (var db = GetDataContext(context))
+			{
+				var guid = (from p in db.Types select Sql.AsSql(Sql.NewGuid7())).First();
+
+				Assert.That(guid, Is.Not.EqualTo(Guid.Empty));
+				Assert.That(GuidVersion(guid), Is.EqualTo(7));
+			}
+		}
+
+#if NET9_0_OR_GREATER
+		[Test]
+		public void CreateVersion7_Native([IncludeDataSources(true, TestProvName.AllClickHouse, TestProvName.AllDuckDB, TestProvName.AllMariaDB, TestProvName.AllPostgreSQL18Plus)] string context)
+		{
+			using var db = GetDataContext(context);
+
+			var guid = (from p in db.Types select Sql.AsSql(Guid.CreateVersion7())).First();
+
+			Assert.That(guid, Is.Not.EqualTo(Guid.Empty));
+			Assert.That(guid.Version, Is.EqualTo(7));
+		}
+
+		[Test]
+		public void CreateVersion7_Emulated([DataSources(TestProvName.AllClickHouse, TestProvName.AllDuckDB, TestProvName.AllMariaDB, TestProvName.AllPostgreSQL18Plus)] string context)
+		{
+			using (new DisableBaseline("Non-deterministic UUIDv7 value"))
+			using (var db = GetDataContext(context))
+			{
+				var guid = (from p in db.Types select Sql.AsSql(Guid.CreateVersion7())).First();
+
+				Assert.That(guid, Is.Not.EqualTo(Guid.Empty));
+				Assert.That(guid.Version, Is.EqualTo(7));
+			}
+		}
+#endif
+
 		[Test]
 		public void CustomFunc([DataSources] string context)
 		{
-			Expressions.MapMember<Person>(p => p.FullName(), (Expression<Func<Person,string>>)(p => p.LastName + ", " + p.FirstName));
+			Expressions.MapMember<Person>(nameof(CustomFunc), p => p.FullName(), (Expression<Func<Person,string>>)(p => p.LastName + ", " + p.FirstName));
 
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Person where p.FullName() == "Pupkin, John" select p.FullName(),
-					from p in db.Person where p.FullName() == "Pupkin, John" select p.FullName());
+			using var db = GetDataContext(context, new MappingSchema(nameof(CustomFunc)));
+			AreEqual(
+				from p in Person where p.FullName() == "Pupkin, John" select p.FullName(),
+				from p in db.Person where p.FullName() == "Pupkin, John" select p.FullName());
 		}
 
 		[Test]
 		public void Count1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				Assert.That(
-					db.Child.Count(c => c.ParentID == 1), Is.EqualTo(Child.Count(c => c.ParentID == 1)));
+			using var db = GetDataContext(context);
+			Assert.That(
+				db.Child.Count(c => c.ParentID == 1), Is.EqualTo(Child.Count(c => c.ParentID == 1)));
 		}
 
 		[Test]
 		public void Sum1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				Assert.That(
-					db.Child.Sum(c => c.ParentID), Is.EqualTo(Child.Sum(c => c.ParentID)));
+			using var db = GetDataContext(context);
+			Assert.That(
+				db.Child.Sum(c => c.ParentID), Is.EqualTo(Child.Sum(c => c.ParentID)));
 		}
 
 		[ExpressionMethod("ChildCountExpression")]
@@ -514,113 +570,111 @@ namespace Tests.Linq
 		[ThrowsRequiresCorrelatedSubquery]
 		public void Sum2([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					   Parent.Select(p => p.Children.Where(c => c.ParentID > 2).Sum(c => c.ParentID * c.ChildID)),
-					db.Parent.Select(p => ChildCount(p)));
+			using var db = GetDataContext(context);
+			AreEqual(
+				   Parent.Select(p => p.Children.Where(c => c.ParentID > 2).Sum(c => c.ParentID * c.ChildID)),
+				db.Parent.Select(p => ChildCount(p)));
 		}
 
 		[Test]
 		public void CustomAggregate([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in Parent
-					group p by p.ParentID into g
-					select new
-					{
-						sum1 = g.Sum  (i => i.Value1) ?? 0,
-						sum2 = g.Sum  (i => i.Value1) ?? 0,
-					},
-					from p in db.Parent
-					group p by p.ParentID into g
-					select new
-					{
-						sum1 = g.Sum  (i => i.Value1) ?? 0,
-						sum2 = g.MySum(i => i.Value1) ?? 0,
-					});
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				group p by p.ParentID into g
+				select new
+				{
+					sum1 = g.Sum(i => i.Value1) ?? 0,
+					sum2 = g.Sum(i => i.Value1) ?? 0,
+				},
+				from p in db.Parent
+				group p by p.ParentID into g
+				select new
+				{
+					sum1 = g.Sum(i => i.Value1) ?? 0,
+					sum2 = g.MySum(i => i.Value1) ?? 0,
+				});
 		}
 
 		[Test]
 		public void GetValueOrDefault([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent where p.Value1.GetValueOrDefault() > 0 select new { Value = p.Value1.GetValueOrDefault() },
-					from p in db.Parent where p.Value1.GetValueOrDefault() > 0 select new { Value = p.Value1.GetValueOrDefault() });
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent where p.Value1.GetValueOrDefault() > 0 select new { Value = p.Value1.GetValueOrDefault() },
+				from p in db.Parent where p.Value1.GetValueOrDefault() > 0 select new { Value = p.Value1.GetValueOrDefault() });
 		}
 
 		[Test]
 		public void AsNullTest([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p1 in    Parent
-					from p2 in    Parent
-					where p1.Value1 == p2.Value1
-					select p1,
-					from p1 in db.Parent
-					from p2 in db.Parent
-					where p1.Value1 == p2.Value1
-					select p1);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p1 in Parent
+				from p2 in Parent
+				where p1.Value1 == p2.Value1
+				select p1,
+				from p1 in db.Parent
+				from p2 in db.Parent
+				where p1.Value1 == p2.Value1
+				select p1);
 		}
 
 		[Test]
 		public void AsNotNullTest([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p1 in    Parent
-					from p2 in    Parent
-					where p1.Value1 != null && p1.Value1 == p2.Value1
-					select p1,
-					from p1 in db.Parent
-					from p2 in db.Parent
-					where Sql.AsNotNull(p1.Value1) == Sql.AsNotNull(p2.Value1)
-					select p1);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p1 in Parent
+				from p2 in Parent
+				where p1.Value1 != null && p1.Value1 == p2.Value1
+				select p1,
+				from p1 in db.Parent
+				from p2 in db.Parent
+				where Sql.AsNotNull(p1.Value1) == Sql.AsNotNull(p2.Value1)
+				select p1);
 		}
 
 		[Test]
 		public void Between1([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent
-					where p.Value1.Between(1, 10)
-					select p,
-					from p in db.Parent
-					where p.Value1.Between(1, 10)
-					select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				where p.Value1.Between(1, 10)
+				select p,
+				from p in db.Parent
+				where p.Value1.Between(1, 10)
+				select p);
 		}
 
 		[Test]
 		public void Between2([DataSources] string context)
 		{
-			using (var db = GetDataContext(context))
-				AreEqual(
-					from p in    Parent
-					where p.ParentID.Between(1, 10)
-					select p,
-					from p in db.Parent
-					where p.ParentID.Between(1, 10)
-					select p);
+			using var db = GetDataContext(context);
+			AreEqual(
+				from p in Parent
+				where p.ParentID.Between(1, 10)
+				select p,
+				from p in db.Parent
+				where p.ParentID.Between(1, 10)
+				select p);
 		}
 
 		[Test]
 		public void MatchFtsTest([IncludeDataSources(true, TestProvName.AllSQLite)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				var q = from c in db.Types
+			using var db = GetDataContext(context);
+			var q = from c in db.Types
 					where SqlLite.MatchFts(c, "some*")
 					select c;
 
-				// FTS5 required
-				//q.ToArray();
+			// FTS5 required
+			//q.ToArray();
 
-				var str = q.ToSqlQuery().Sql;
-				Assert.That(str, Does.Contain(" MATCH "));
-			}
+			var str = q.ToSqlQuery().Sql;
+			Assert.That(str, Does.Contain(" MATCH "));
 		}
 
 		[Table]

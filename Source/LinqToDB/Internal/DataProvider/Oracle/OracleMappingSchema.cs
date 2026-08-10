@@ -29,14 +29,14 @@ namespace LinqToDB.Internal.DataProvider.Oracle
 		private static readonly CompositeFormat TIMESTAMP6_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff}'");
 		private static readonly CompositeFormat TIMESTAMP7_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff}'");
 
-		private static readonly CompositeFormat TIMESTAMPTZ0_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ1_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.f} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ2_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ff} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ3_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fff} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ4_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffff} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ5_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffff} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ6_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff} +00:00'");
-		private static readonly CompositeFormat TIMESTAMPTZ7_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff} +00:00'");
+		private static readonly CompositeFormat TIMESTAMPTZ0_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ1_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.f zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ2_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ff zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ3_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fff zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ4_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffff zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ5_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffff zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ6_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff zzz}'");
+		private static readonly CompositeFormat TIMESTAMPTZ7_FORMAT = CompositeFormat.Parse("TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff zzz}'");
 #else
 		private const string DATE_FORMAT = "DATE '{0:yyyy-MM-dd}'";
 
@@ -51,14 +51,14 @@ namespace LinqToDB.Internal.DataProvider.Oracle
 		private const string TIMESTAMP6_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff}'";
 		private const string TIMESTAMP7_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff}'";
 
-		private const string TIMESTAMPTZ0_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss} +00:00'";
-		private const string TIMESTAMPTZ1_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.f} +00:00'";
-		private const string TIMESTAMPTZ2_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ff} +00:00'";
-		private const string TIMESTAMPTZ3_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fff} +00:00'";
-		private const string TIMESTAMPTZ4_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffff} +00:00'";
-		private const string TIMESTAMPTZ5_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffff} +00:00'";
-		private const string TIMESTAMPTZ6_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff} +00:00'";
-		private const string TIMESTAMPTZ7_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff} +00:00'";
+		private const string TIMESTAMPTZ0_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss zzz}'";
+		private const string TIMESTAMPTZ1_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.f zzz}'";
+		private const string TIMESTAMPTZ2_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ff zzz}'";
+		private const string TIMESTAMPTZ3_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fff zzz}'";
+		private const string TIMESTAMPTZ4_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffff zzz}'";
+		private const string TIMESTAMPTZ5_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffff zzz}'";
+		private const string TIMESTAMPTZ6_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.ffffff zzz}'";
+		private const string TIMESTAMPTZ7_FORMAT = "TIMESTAMP '{0:yyyy-MM-dd HH:mm:ss.fffffff zzz}'";
 #endif
 
 		OracleMappingSchema() : base(ProviderName.Oracle)
@@ -71,13 +71,13 @@ namespace LinqToDB.Internal.DataProvider.Oracle
 
 			SetConvertExpression<decimal,TimeSpan>(v => new TimeSpan((long)v));
 
-			SetValueToSqlConverter(typeof(Guid),           (sb, _,_,v) => ConvertBinaryToSql  (sb,     ((Guid)   v).ToByteArray()));
-			SetValueToSqlConverter(typeof(DateTime),       (sb,dt,_,v) => ConvertDateTimeToSql(sb, dt, (DateTime)v));
-			SetValueToSqlConverter(typeof(DateTimeOffset), (sb,dt,_,v) => ConvertDateTimeToSql(sb, dt, ((DateTimeOffset)v).UtcDateTime));
-			SetValueToSqlConverter(typeof(string)        , (sb,dt,_,v) => ConvertStringToSql  (sb, dt, (string)v));
-			SetValueToSqlConverter(typeof(char)          , (sb, _,_,v) => ConvertCharToSql    (sb,     (char)v));
-			SetValueToSqlConverter(typeof(byte[]),         (sb, _,_,v) => ConvertBinaryToSql  (sb,     (byte[])v));
-			SetValueToSqlConverter(typeof(Binary),         (sb, _,_,v) => ConvertBinaryToSql  (sb,     ((Binary)v).ToArray()));
+			SetValueToSqlConverter(typeof(Guid),           (sb, _,_,v) => ConvertBinaryToSql        (sb,     ((Guid)   v).ToByteArray()));
+			SetValueToSqlConverter(typeof(DateTime),       (sb,dt,_,v) => ConvertDateTimeToSql      (sb, dt, (DateTime)v));
+			SetValueToSqlConverter(typeof(DateTimeOffset), (sb,dt,_,v) => ConvertDateTimeOffsetToSql(sb, dt, (DateTimeOffset)v));
+			SetValueToSqlConverter(typeof(string)        , (sb,dt,_,v) => ConvertStringToSql        (sb, dt, (string)v));
+			SetValueToSqlConverter(typeof(char)          , (sb, _,_,v) => ConvertCharToSql          (sb,     (char)v));
+			SetValueToSqlConverter(typeof(byte[]),         (sb, _,_,v) => ConvertBinaryToSql        (sb,     (byte[])v));
+			SetValueToSqlConverter(typeof(Binary),         (sb, _,_,v) => ConvertBinaryToSql        (sb,     ((Binary)v).ToArray()));
 
 #if SUPPORTS_DATEONLY
 			SetValueToSqlConverter(typeof(DateOnly),       (sb,dt,_,v) => ConvertDateOnlyToSql(sb, (DateOnly)v));
@@ -183,41 +183,63 @@ namespace LinqToDB.Internal.DataProvider.Oracle
 				case DataType.Date:
 					format = DATE_FORMAT;
 					break;
-				case DataType.DateTime2:
-					switch (dataType.Type.Precision)
-					{
-						case 0   : format = TIMESTAMP0_FORMAT; break;
-						case 1   : format = TIMESTAMP1_FORMAT; break;
-						case 2   : format = TIMESTAMP2_FORMAT; break;
-						case 3   : format = TIMESTAMP3_FORMAT; break;
-						case 4   : format = TIMESTAMP4_FORMAT; break;
-						case 5   : format = TIMESTAMP5_FORMAT; break;
-						// .net types doesn't support more than 7 digits, so it doesn't make sense to generate 8/9
-						case >= 7: format = TIMESTAMP7_FORMAT; break;
-						default  : format = TIMESTAMP6_FORMAT; break;
-					}
-
-					break;
 				case DataType.DateTimeOffset:
 					// just use UTC literal
 					value = value.ToUniversalTime();
-					switch (dataType.Type.Precision)
+					goto case DataType.DateTime2;
+				case DataType.DateTime2:
+					format = dataType.Type.Precision switch
 					{
-						case 0   : format = TIMESTAMPTZ0_FORMAT; break;
-						case 1   : format = TIMESTAMPTZ1_FORMAT; break;
-						case 2   : format = TIMESTAMPTZ2_FORMAT; break;
-						case 3   : format = TIMESTAMPTZ3_FORMAT; break;
-						case 4   : format = TIMESTAMPTZ4_FORMAT; break;
-						case 5   : format = TIMESTAMPTZ5_FORMAT; break;
+						0    => TIMESTAMP0_FORMAT,
+						1    => TIMESTAMP1_FORMAT,
+						2    => TIMESTAMP2_FORMAT,
+						3    => TIMESTAMP3_FORMAT,
+						4    => TIMESTAMP4_FORMAT,
+						5    => TIMESTAMP5_FORMAT,
 						// .net types doesn't support more than 7 digits, so it doesn't make sense to generate 8/9
-						case >= 7: format = TIMESTAMPTZ7_FORMAT; break;
-						default  : format = TIMESTAMPTZ6_FORMAT; break;
-					}
-
+						>= 7 => TIMESTAMP7_FORMAT,
+						_    => TIMESTAMP6_FORMAT,
+					};
 					break;
 				case DataType.DateTime:
 				default:
 					format = DATETIME_FORMAT;
+					break;
+			}
+
+			stringBuilder.AppendFormat(CultureInfo.InvariantCulture, format, value);
+		}
+
+		static void ConvertDateTimeOffsetToSql(StringBuilder stringBuilder, SqlDataType dataType, DateTimeOffset value)
+		{
+#if SUPPORTS_COMPOSITE_FORMAT
+			CompositeFormat format;
+#else
+			string format;
+#endif
+			switch (dataType.Type.DataType)
+			{
+				case DataType.Date:
+				case DataType.DateTime:
+				case DataType.DateTime2:
+					// zone-less target: normalize to UTC instant (offset cannot be represented in the column)
+					ConvertDateTimeToSql(stringBuilder, dataType, value.UtcDateTime);
+					return;
+
+				case DataType.DateTimeOffset:
+				default:
+					format = dataType.Type.Precision switch
+					{
+						0    => TIMESTAMPTZ0_FORMAT,
+						1    => TIMESTAMPTZ1_FORMAT,
+						2    => TIMESTAMPTZ2_FORMAT,
+						3    => TIMESTAMPTZ3_FORMAT,
+						4    => TIMESTAMPTZ4_FORMAT,
+						5    => TIMESTAMPTZ5_FORMAT,
+						// .net types doesn't support more than 7 digits, so it doesn't make sense to generate 8/9
+						>= 7 => TIMESTAMPTZ7_FORMAT,
+						_    => TIMESTAMPTZ6_FORMAT,
+					};
 					break;
 			}
 
@@ -233,47 +255,17 @@ namespace LinqToDB.Internal.DataProvider.Oracle
 
 		internal static readonly OracleMappingSchema Instance = new ();
 
-		public sealed class NativeMappingSchema : LockedMappingSchema
-		{
-			public NativeMappingSchema() : base(ProviderName.OracleNative, OracleProviderAdapter.GetInstance(OracleProvider.Native).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class NativeMappingSchema() : LockedMappingSchema(ProviderName.OracleNative, OracleProviderAdapter.GetInstance(OracleProvider.Native).MappingSchema, Instance);
 
-		public sealed class ManagedMappingSchema : LockedMappingSchema
-		{
-			public ManagedMappingSchema() : base(ProviderName.OracleManaged, OracleProviderAdapter.GetInstance(OracleProvider.Managed).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class ManagedMappingSchema() : LockedMappingSchema(ProviderName.OracleManaged, OracleProviderAdapter.GetInstance(OracleProvider.Managed).MappingSchema, Instance);
 
-		public sealed class DevartMappingSchema : LockedMappingSchema
-		{
-			public DevartMappingSchema() : base(ProviderName.OracleDevart, OracleProviderAdapter.GetInstance(OracleProvider.Devart).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class DevartMappingSchema() : LockedMappingSchema(ProviderName.OracleDevart, OracleProviderAdapter.GetInstance(OracleProvider.Devart).MappingSchema, Instance);
 
-		public sealed class Native11MappingSchema : LockedMappingSchema
-		{
-			public Native11MappingSchema() : base(ProviderName.Oracle11Native, OracleProviderAdapter.GetInstance(OracleProvider.Native).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class Native11MappingSchema() : LockedMappingSchema(ProviderName.Oracle11Native, OracleProviderAdapter.GetInstance(OracleProvider.Native).MappingSchema, Instance);
 
-		public sealed class Managed11MappingSchema : LockedMappingSchema
-		{
-			public Managed11MappingSchema() : base(ProviderName.Oracle11Managed, OracleProviderAdapter.GetInstance(OracleProvider.Managed).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class Managed11MappingSchema() : LockedMappingSchema(ProviderName.Oracle11Managed, OracleProviderAdapter.GetInstance(OracleProvider.Managed).MappingSchema, Instance);
 
-		public sealed class Devart11MappingSchema : LockedMappingSchema
-		{
-			public Devart11MappingSchema() : base(ProviderName.Oracle11Devart, OracleProviderAdapter.GetInstance(OracleProvider.Devart).MappingSchema, Instance)
-			{
-			}
-		}
+		public sealed class Devart11MappingSchema() : LockedMappingSchema(ProviderName.Oracle11Devart, OracleProviderAdapter.GetInstance(OracleProvider.Devart).MappingSchema, Instance);
 
 		sealed class OracleRemoteMappingSchema(string configuration) : LockedMappingSchema(configuration, Instance);
 

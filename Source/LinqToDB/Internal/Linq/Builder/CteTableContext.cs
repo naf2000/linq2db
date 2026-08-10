@@ -9,33 +9,25 @@ using LinqToDB.Mapping;
 
 namespace LinqToDB.Internal.Linq.Builder
 {
-	internal sealed class CteTableContext: BuildContextBase, ITableContext
+	internal sealed class CteTableContext : BuildContextBase, ITableContext
 	{
-		public override  MappingSchema MappingSchema => CteContext.MappingSchema;
+		public override MappingSchema MappingSchema => CteContext.MappingSchema;
 
-		public CteContext  CteContext { get; set; }
+		public CteContext CteContext { get; set; }
 
 		public SqlCteTable CteTable
 		{
-			get
+			get => field ??= CteContext switch
 			{
-				if (field == null)
-				{
-					field = CteContext switch
-					{
-						{ CteClause: var clause } => new SqlCteTable(clause, ObjectType),
-						_ => throw new InvalidOperationException("CteContext not initialized"),
-					};
-				}
-
-				return field;
-			}
+				{ CteClause: var clause } => new SqlCteTable(clause, ObjectType),
+				_ => throw new InvalidOperationException("CteContext not initialized"),
+			};
 			set;
 		}
 
-		public Type            ObjectType   { get; }
-		public SqlTable        SqlTable     => CteTable;
-		public LoadWithEntity? LoadWithRoot { get; set; }
+		public Type                  ObjectType   { get; }
+		ISqlNamedTable ITableContext.NamedTable     => CteTable;
+		public LoadWithEntity?       LoadWithRoot { get; set; }
 
 		public CteTableContext(TranslationModifier translationModifier, ExpressionBuilder builder, IBuildContext? parent, Type objectType, SelectQuery selectQuery, CteContext cteContext)
 			: this(translationModifier, builder, parent, objectType, selectQuery)
@@ -79,7 +71,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			return context;
 		}
 
-		readonly Dictionary<string, SqlPlaceholderExpression> _fieldsMap = new ();
+		readonly Dictionary<string, SqlPlaceholderExpression> _fieldsMap = new (StringComparer.Ordinal);
 
 		public override Expression MakeExpression(Expression path, ProjectFlags flags)
 		{
@@ -92,7 +84,10 @@ namespace LinqToDB.Internal.Linq.Builder
 				return path;
 			}
 
-			var ctePath = SequenceHelper.CorrectExpression(path, this, CteContext);
+			var ctePath = SequenceHelper.IsSpecialProperty(path, this)
+				? SequenceHelper.ChangeSpecialPropertyObject(path, CteContext)
+				: SequenceHelper.CorrectExpression(path, this, CteContext);
+
 			if (!ReferenceEquals(ctePath, path))
 			{
 				CteContext.InitQuery();
@@ -109,6 +104,28 @@ namespace LinqToDB.Internal.Linq.Builder
 			}
 
 			return ctePath;
+		}
+
+		public MemberExpression RegisterVirtualField(Expression expression)
+		{
+			if (expression is SqlPlaceholderExpression placeholder)
+			{
+				if (placeholder.Sql is SqlCteTableField { CteField: not null } cteTableField)
+				{
+					foreach (var map in _fieldsMap.Values)
+					{
+						if (ReferenceEquals(map.Sql, cteTableField))
+						{
+							expression = CteContext.GetFieldPlaceholder(cteTableField.CteField);
+							break;
+						}
+					}
+				}
+			}
+
+			var corrected    = SequenceHelper.ReplaceContext(expression, this, CteContext);
+			var virtualField = CteContext.RegisterVirtualField(corrected);
+			return SequenceHelper.ChangeSpecialPropertyObject(virtualField, this);
 		}
 
 		sealed class CteTableProxy : BuildProxyBase<CteTableContext>
@@ -149,13 +166,29 @@ namespace LinqToDB.Internal.Linq.Builder
 				if (placeholder.TrackingPath == null)
 					continue;
 
-				var field = QueryHelper.GetUnderlyingField(placeholder.Sql);
-				if (field == null)
+				// The underlying expression can be SqlCteField (from CteContext) or SqlField
+				var underlying = QueryHelper.GetUnderlyingExpression(placeholder.Sql);
+
+				string?     fieldName = null;
+				SqlCteField? cteField = null;
+
+				if (underlying is SqlCteField directCteField)
+				{
+					fieldName = directCteField.Name;
+					cteField  = directCteField;
+				}
+				else if (underlying is SqlField sqlField)
+				{
+					fieldName = sqlField.Name;
+					cteField  = CteContext.CteClause.Fields.Find(f => string.Equals(f.Name, sqlField.Name, StringComparison.Ordinal));
+				}
+
+				if (fieldName == null)
 					throw new InvalidOperationException($"Could not get field from SQL: {placeholder.Sql}");
 
-				if (!_fieldsMap.TryGetValue(field.Name, out var newPlaceholder))
+				if (!_fieldsMap.TryGetValue(fieldName, out var newPlaceholder))
 				{
-					var newField = new SqlField(field);
+					var newField = new SqlCteTableField(cteField);
 
 					CteTable.Add(newField);
 
@@ -165,7 +198,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 					newPlaceholder = newPlaceholder.WithType(placeholder.Type);
 
-					_fieldsMap[field.Name] = newPlaceholder;
+					_fieldsMap[fieldName] = newPlaceholder;
 				}
 				else
 				{
@@ -197,7 +230,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			var newContext = new CteTableContext(TranslationModifier, Builder, Parent, ObjectType, SelectQuery)
 			{
 				LoadWithRoot = LoadWithRoot,
-				CteTable = context.CloneElement(CteTable)
+				CteTable = context.CloneElement(CteTable),
 			};
 
 			context.RegisterCloned(this, newContext);

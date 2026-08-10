@@ -443,7 +443,7 @@ namespace LinqToDB.Internal.SqlProvider
 
 		static Dictionary<string, ISqlExpression> GetFields(ISqlTableSource source)
 		{
-			var res = new Dictionary<string, ISqlExpression>();
+			var res = new Dictionary<string, ISqlExpression>(StringComparer.Ordinal);
 
 			if (source is SqlTable table)
 			{
@@ -591,7 +591,15 @@ namespace LinqToDB.Internal.SqlProvider
 			if (field1 is SqlField sqlField1)
 			{
 				if (field2 is SqlField sqlField2)
-					return sqlField1.PhysicalName == sqlField2.PhysicalName;
+					return string.Equals(sqlField1.PhysicalName, sqlField2.PhysicalName, StringComparison.Ordinal);
+
+				return false;
+			}
+
+			if (field1 is SqlCteTableField cteField1)
+			{
+				if (field2 is SqlCteTableField cteField2)
+					return ReferenceEquals(cteField1.CteField, cteField2.CteField);
 
 				return false;
 			}

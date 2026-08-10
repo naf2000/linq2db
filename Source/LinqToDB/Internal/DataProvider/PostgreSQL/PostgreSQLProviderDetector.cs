@@ -14,9 +14,12 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider92 = CreateDataProvider<PostgreSQLDataProvider92>();
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider93 = CreateDataProvider<PostgreSQLDataProvider93>();
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider95 = CreateDataProvider<PostgreSQLDataProvider95>();
+		static readonly Lazy<IDataProvider> _postgreSQLDataProvider11 = CreateDataProvider<PostgreSQLDataProvider11>();
+		static readonly Lazy<IDataProvider> _postgreSQLDataProvider12 = CreateDataProvider<PostgreSQLDataProvider12>();
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider13 = CreateDataProvider<PostgreSQLDataProvider13>();
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider15 = CreateDataProvider<PostgreSQLDataProvider15>();
 		static readonly Lazy<IDataProvider> _postgreSQLDataProvider18 = CreateDataProvider<PostgreSQLDataProvider18>();
+		static readonly Lazy<IDataProvider> _postgreSQLDataProvider19 = CreateDataProvider<PostgreSQLDataProvider19>();
 
 		public override IDataProvider? DetectProvider(ConnectionOptions options)
 		{
@@ -25,46 +28,56 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 				case ProviderName.PostgreSQL92 : return _postgreSQLDataProvider92.Value;
 				case ProviderName.PostgreSQL93 : return _postgreSQLDataProvider93.Value;
 				case ProviderName.PostgreSQL95 : return _postgreSQLDataProvider95.Value;
+				case ProviderName.PostgreSQL11 : return _postgreSQLDataProvider11.Value;
+				case ProviderName.PostgreSQL12 : return _postgreSQLDataProvider12.Value;
 				case ProviderName.PostgreSQL13 : return _postgreSQLDataProvider13.Value;
 				case ProviderName.PostgreSQL15 : return _postgreSQLDataProvider15.Value;
 				case ProviderName.PostgreSQL18 : return _postgreSQLDataProvider18.Value;
+				case ProviderName.PostgreSQL19 : return _postgreSQLDataProvider19.Value;
 				case ""                        :
 				case null                      :
-					if (options.ConfigurationString == "PostgreSQL")
+					if (string.Equals(options.ConfigurationString, "PostgreSQL", StringComparison.Ordinal))
 						goto case NpgsqlProviderAdapter.ClientNamespace;
 					break;
 				case NpgsqlProviderAdapter.ClientNamespace :
-				case var providerName when providerName.Contains("PostgreSQL") || providerName.Contains(NpgsqlProviderAdapter.AssemblyName):
+				case var providerName when providerName.Contains("PostgreSQL", StringComparison.Ordinal) || providerName.Contains(NpgsqlProviderAdapter.AssemblyName, StringComparison.Ordinal):
 					if (options.ConfigurationString != null)
 					{
-						if (options.ConfigurationString.Contains("18"))
+						if (options.ConfigurationString.Contains("19", StringComparison.Ordinal))
+							return _postgreSQLDataProvider19.Value;
+
+						if (options.ConfigurationString.Contains("18", StringComparison.Ordinal))
 							return _postgreSQLDataProvider18.Value;
 
-						if (options.ConfigurationString.Contains("15")
-							|| options.ConfigurationString.Contains("16")
-							|| options.ConfigurationString.Contains("17"))
+						if (options.ConfigurationString.Contains("15", StringComparison.Ordinal)
+							|| options.ConfigurationString.Contains("16", StringComparison.Ordinal)
+							|| options.ConfigurationString.Contains("17", StringComparison.Ordinal))
 						{
 							return _postgreSQLDataProvider15.Value;
 						}
 
-						if (options.ConfigurationString.Contains("14")
-							|| options.ConfigurationString.Contains("13"))
+						if (options.ConfigurationString.Contains("14", StringComparison.Ordinal)
+							|| options.ConfigurationString.Contains("13", StringComparison.Ordinal))
 						{
 							return _postgreSQLDataProvider13.Value;
 						}
 
-						if (options.ConfigurationString.Contains("92") || options.ConfigurationString.Contains("9.2"))
+						if (options.ConfigurationString.Contains("12", StringComparison.Ordinal))
+							return _postgreSQLDataProvider12.Value;
+
+						if (options.ConfigurationString.Contains("11", StringComparison.Ordinal))
+							return _postgreSQLDataProvider11.Value;
+
+						if (options.ConfigurationString.Contains("92", StringComparison.Ordinal) || options.ConfigurationString.Contains("9.2", StringComparison.Ordinal))
 							return _postgreSQLDataProvider92.Value;
 
-						if (options.ConfigurationString.Contains("93") || options.ConfigurationString.Contains("9.3") ||
-							options.ConfigurationString.Contains("94") || options.ConfigurationString.Contains("9.4"))
+						if (options.ConfigurationString.Contains("93", StringComparison.Ordinal) || options.ConfigurationString.Contains("9.3", StringComparison.Ordinal) ||
+							options.ConfigurationString.Contains("94", StringComparison.Ordinal) || options.ConfigurationString.Contains("9.4", StringComparison.Ordinal))
 							return _postgreSQLDataProvider93.Value;
 
-						if (options.ConfigurationString.Contains("95") || options.ConfigurationString.Contains("9.5") ||
-							options.ConfigurationString.Contains("96") || options.ConfigurationString.Contains("9.6") ||
-							options.ConfigurationString.Contains("10") ||
-							options.ConfigurationString.Contains("11") ||
-							options.ConfigurationString.Contains("12"))
+						if (options.ConfigurationString.Contains("95", StringComparison.Ordinal) || options.ConfigurationString.Contains("9.5", StringComparison.Ordinal) ||
+							options.ConfigurationString.Contains("96", StringComparison.Ordinal) || options.ConfigurationString.Contains("9.6", StringComparison.Ordinal) ||
+							options.ConfigurationString.Contains("10", StringComparison.Ordinal))
 							return _postgreSQLDataProvider95.Value;
 					}
 
@@ -93,9 +106,12 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			return version switch
 			{
 				PostgreSQLVersion.AutoDetect => GetDataProvider(options, default, DetectServerVersion(options, default) ?? DefaultVersion),
+				PostgreSQLVersion.v19        => _postgreSQLDataProvider19.Value,
 				PostgreSQLVersion.v18        => _postgreSQLDataProvider18.Value,
 				PostgreSQLVersion.v15        => _postgreSQLDataProvider15.Value,
 				PostgreSQLVersion.v13        => _postgreSQLDataProvider13.Value,
+				PostgreSQLVersion.v12        => _postgreSQLDataProvider12.Value,
+				PostgreSQLVersion.v11        => _postgreSQLDataProvider11.Value,
 				PostgreSQLVersion.v95        => _postgreSQLDataProvider95.Value,
 				PostgreSQLVersion.v93        => _postgreSQLDataProvider93.Value,
 				_                            => _postgreSQLDataProvider92.Value,
@@ -104,24 +120,18 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 
 		protected override PostgreSQLVersion? DetectServerVersion(DbConnection connection, DbTransaction? transaction)
 		{
-			var postgreSqlVersion = NpgsqlProviderAdapter.GetInstance().ConnectionWrapper(connection).PostgreSqlVersion;
-
-			if (postgreSqlVersion.Major >= 18)
-				return PostgreSQLVersion.v18;
-
-			if (postgreSqlVersion.Major >= 15)
-				return PostgreSQLVersion.v15;
-
-			if (postgreSqlVersion.Major >= 13)
-				return PostgreSQLVersion.v13;
-
-			if (postgreSqlVersion.Major > 9 || postgreSqlVersion.Major == 9 && postgreSqlVersion.Minor > 4)
-				return PostgreSQLVersion.v95;
-
-			if (postgreSqlVersion.Major == 9 && postgreSqlVersion.Minor > 2)
-				return PostgreSQLVersion.v93;
-
-			return DefaultVersion;
+			return NpgsqlProviderAdapter.GetInstance().ConnectionWrapper(connection).PostgreSqlVersion switch
+			{
+				{ Major: >= 19 } => PostgreSQLVersion.v19,
+				{ Major: >= 18 } => PostgreSQLVersion.v18,
+				{ Major: >= 15 } => PostgreSQLVersion.v15,
+				{ Major: >= 13 } => PostgreSQLVersion.v13,
+				{ Major: >= 12 } => PostgreSQLVersion.v12,
+				{ Major: >= 11 } => PostgreSQLVersion.v11,
+				{ Major: > 9 } or { Major: 9, Minor: > 4 } => PostgreSQLVersion.v95,
+				{ Major: 9, Minor: > 2 } => PostgreSQLVersion.v93,
+				_ => DefaultVersion,
+			};
 		}
 
 		protected override DbConnection CreateConnection(Provider provider, string connectionString)

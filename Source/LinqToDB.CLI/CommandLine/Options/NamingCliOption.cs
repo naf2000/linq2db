@@ -1,9 +1,11 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
 using System.Text.Json;
 
+using LinqToDB.CommandLine.Commands;
 using LinqToDB.Naming;
 
-namespace LinqToDB.CommandLine
+namespace LinqToDB.CommandLine.Options
 {
 	/// <summary>
 	/// Code identifier normalization/generation options. Not supported in CLI (JSON only).
@@ -48,7 +50,7 @@ namespace LinqToDB.CommandLine
 				return null;
 			}
 
-			var properties = new HashSet<string>();
+			var properties = new HashSet<string>(StringComparer.Ordinal);
 
 			var options = new NormalizationOptions();
 
@@ -104,10 +106,10 @@ namespace LinqToDB.CommandLine
 								errorDetails = $"pluralization : unknown value: '{pluralizationValue}'";
 								return null;
 						}
-						
+
 						break;
 					case "prefix"                          :
-						if (property.Value.ValueKind == JsonValueKind.Null || property.Value.ValueKind == JsonValueKind.Undefined)
+						if (property.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
 							options.Prefix = null;
 						else if (property.Value.ValueKind == JsonValueKind.String)
 							options.Prefix = property.Value.GetString()!;
@@ -119,7 +121,7 @@ namespace LinqToDB.CommandLine
 
 						break;
 					case "suffix"                          :
-						if (property.Value.ValueKind == JsonValueKind.Null || property.Value.ValueKind == JsonValueKind.Undefined)
+						if (property.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
 							options.Suffix = null;
 						else if (property.Value.ValueKind == JsonValueKind.String)
 							options.Suffix = property.Value.GetString()!;
@@ -147,7 +149,7 @@ namespace LinqToDB.CommandLine
 								errorDetails = $"transformation : unknown value: '{transformationValue}'";
 								return null;
 						}
-						
+
 						break;
 					case "pluralize_if_ends_with_word_only":
 						if (property.Value.ValueKind == JsonValueKind.True)

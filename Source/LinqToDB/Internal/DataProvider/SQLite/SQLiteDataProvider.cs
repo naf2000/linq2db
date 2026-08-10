@@ -11,6 +11,7 @@ using LinqToDB.Data;
 using LinqToDB.DataProvider.SQLite;
 using LinqToDB.Internal.DataProvider.SQLite.Translation;
 using LinqToDB.Internal.SqlProvider;
+using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Linq.Translation;
 using LinqToDB.Mapping;
 using LinqToDB.SchemaProvider;
@@ -43,9 +44,14 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 			SqlProviderFlags.IsSkipSupportedIfTake             = true;
 			SqlProviderFlags.IsCommonTableExpressionsSupported = true;
 			SqlProviderFlags.IsSubQueryOrderBySupported        = true;
+			// SQLite renders NULLS FIRST/LAST natively since 3.30 (2019); all currently shipped builds are newer.
+			SqlProviderFlags.IsNullsOrderingSupported          = true;
+			SqlProviderFlags.DefaultNullsOrdering              = NullsDefaultOrdering.Smallest; // SQLite sorts NULL as the smallest value
+			SqlProviderFlags.IsUnionAllOrderBySupported        = true;
 			SqlProviderFlags.IsDistinctFromSupported           = true; // since 3.39.0
 			SqlProviderFlags.SupportsPredicatesComparison      = true;
 			SqlProviderFlags.DefaultMultiQueryIsolationLevel   = IsolationLevel.Serializable;
+			SqlProviderFlags.MaxColumnCount                    = 2000;
 
 			// This is commented, because runtime for SDS 2 has this flag disabled
 			// and there is no value in supporting it for v1 as it doesn't add any additional value
@@ -58,6 +64,10 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 			//SqlProviderFlags.IsUpdateSkipTakeSupported = Provider == SQLiteProvider.System;
 
 			SqlProviderFlags.SupportedCorrelatedSubqueriesLevel = null;
+
+			// SQLite has no MERGE statement. Upsert configurations that require MERGE lowering
+			// surface a descriptive error via Error_Upsert_MergeLowering_NotSupported.
+			SqlProviderFlags.IsUpsertWithMergeLoweringSupported = false;
 
 			// 3.15.0
 			SqlProviderFlags.RowConstructorSupport = RowFeature.Equality        | RowFeature.Comparisons | RowFeature.UpdateLiteral |
@@ -108,7 +118,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 			 * With additional fixes for cases, where it doesn't work well due to provider being unable to convert value to
 			 * requested type.
 			 */
-			if (Name == ProviderName.SQLiteMS)
+			if (string.Equals(Name, ProviderName.SQLiteMS, StringComparison.Ordinal))
 			{
 				SetSqliteField((r, i) => r.GetInt64(i), new[] { typeof(long), typeof(string), typeof(double) },
 					"INTEGER", "BIGINT", "COUNTER", "IDENTITY", "INT64", "INTEGER64", "LONG", "MEDIUMINT", "UINT", "UINT32", "UNSIGNEDINTEGER32");
@@ -187,7 +197,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 			if (typeName == null)
 				return null;
 
-			var idx = typeName.IndexOf('(');
+			var idx = typeName.IndexOf('(', StringComparison.Ordinal);
 			if (idx != -1)
 				return typeName.Substring(0, idx);
 
@@ -240,7 +250,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 		{
 			// handles situation, when char values were serialized as character hex value for some
 			// versions of Microsoft.Data.Sqlite
-			if (Name == ProviderName.SQLiteMS && value is char chr)
+			if (string.Equals(Name, ProviderName.SQLiteMS, StringComparison.Ordinal) && value is char chr)
 				value = chr.ToString();
 
 			if (value is Guid guid)
@@ -254,7 +264,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 
 						value = guid.ToString().ToUpperInvariant();
 
-						if (Name == ProviderName.SQLiteClassic)
+						if (string.Equals(Name, ProviderName.SQLiteClassic, StringComparison.Ordinal))
 							dataType = dataType.WithDataType(DataType.Text);
 
 						break;
@@ -262,7 +272,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 						value = guid.ToByteArray();
 						break;
 					default:
-						if (Name == ProviderName.SQLiteMS)
+						if (string.Equals(Name, ProviderName.SQLiteMS, StringComparison.Ordinal))
 						{
 							// reverting compatibility breaking change in Microsoft.Data.Sqlite 3.0.0
 							// https://github.com/aspnet/EntityFrameworkCore/issues/15078
@@ -278,7 +288,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 			if (value is DateTime dt)
 			{
 				value = dt.ToString("yyyy-MM-dd HH:mm:ss.fff", DateTimeFormatInfo.InvariantInfo);
-				if (Name == ProviderName.SQLiteClassic)
+				if (string.Equals(Name, ProviderName.SQLiteClassic, StringComparison.Ordinal))
 					dataType = dataType.WithDataType(DataType.VarChar);
 			}
 
@@ -289,7 +299,7 @@ namespace LinqToDB.Internal.DataProvider.SQLite
 				if (dataType.DataType == DataType.Date)
 				{
 					value = ((DateTime)value).ToString(SQLiteMappingSchema.DATE_FORMAT_RAW, CultureInfo.InvariantCulture);
-					if (Name == ProviderName.SQLiteClassic)
+					if (string.Equals(Name, ProviderName.SQLiteClassic, StringComparison.Ordinal))
 						dataType = dataType.WithDataType(DataType.VarChar);
 				}
 			}

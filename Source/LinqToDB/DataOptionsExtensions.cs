@@ -30,9 +30,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls how group data for LINQ queries ended with GroupBy will be loaded:
-		/// - if <c>true</c> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
-		/// - if <c>false</c> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
+		/// - if <see langword="false"/> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -44,9 +44,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls behavior of <c>linq2db</c> when there is no updateable fields in Update query:
-		/// - if <c>true</c> - query not executed and Update operation returns 0 as number of affected records;
-		/// - if <c>false</c> - <see cref="LinqToDBException"/> will be thrown.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - query not executed and Update operation returns 0 as number of affected records;
+		/// - if <see langword="false"/> - <see cref="LinqToDBException"/> will be thrown.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithIgnoreEmptyUpdate(this LinqOptions options, bool ignoreEmptyUpdate)
@@ -60,7 +60,7 @@ namespace LinqToDB
 		/// Test file will be placed to <c>linq2db</c> subfolder of temp folder and exact file path will be logged
 		/// to data connection tracing infrastructure.
 		/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithGenerateExpressionTest(this LinqOptions options, bool generateExpressionTest)
@@ -71,7 +71,7 @@ namespace LinqToDB
 		/// <summary>
 		/// Enables logging of generated mapping expression to data connection tracing infrastructure.
 		/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithTraceMapperExpression(this LinqOptions options, bool traceMapperExpression)
@@ -82,10 +82,10 @@ namespace LinqToDB
 		/// <summary>
 		/// Controls behavior, when LINQ query chain contains multiple <see cref="System.Linq.Queryable.OrderBy{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> or <see cref="System.Linq.Queryable.OrderByDescending{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> calls:
 		/// <list type="bullet">
-		/// <item>if <c>true</c> - non-first OrderBy* call will be treated as ThenBy* call;</item>
-		/// <item>if <c>false</c> - OrderBy* call will place sort specifications, added by previous OrderBy* and ThenBy* calls, after current call.</item>
+		/// <item>if <see langword="true"/> - non-first OrderBy* call will be treated as ThenBy* call;</item>
+		/// <item>if <see langword="false"/> - OrderBy* call will place sort specifications, added by previous OrderBy* and ThenBy* calls, after current call.</item>
 		/// </list>
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// <para>
 		/// Example:
 		/// <code>
@@ -115,9 +115,9 @@ namespace LinqToDB
 		/// Controls behavior, when LINQ query chain contains multiple
 		/// <see cref="System.Linq.Queryable.OrderBy          {TSource,TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> or
 		/// <see cref="System.Linq.Queryable.OrderByDescending{TSource,TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> calls:
-		/// - if <c>true</c> - non-first OrderBy* call will be treated as ThenBy* call;
-		/// - if <c>false</c> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - non-first OrderBy* call will be treated as ThenBy* call;
+		/// - if <see langword="false"/> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -133,7 +133,7 @@ namespace LinqToDB
 		/// - removes duplicate joins by unique target table key;
 		/// - removes self-joins by unique key;
 		/// - removes left joins if joined table is not used in query.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithOptimizeJoins(this LinqOptions options, bool optimizeJoins)
@@ -195,9 +195,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls behavior of LINQ query, which ends with GroupBy call.
-		/// - if <c>true</c> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
-		/// - if <c>false</c> - eager loading used.
-		/// Default value: <c>true</c>.
+		/// - if <see langword="true"/> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
+		/// - if <see langword="false"/> - eager loading used.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		/// <remarks>
 		/// <a href="https://github.com/linq2db/inq2db/issues/365">More details</a>.
@@ -209,6 +209,30 @@ namespace LinqToDB
 		}
 
 		/// <summary>
+		/// With <see cref="ImplicitCollectionLoading.Throw"/>, an implicit eager load (a collection projected in a <c>Select</c> without
+		/// being explicitly requested) throws <see cref="LinqToDBException"/> at build time. The guard is bypassed
+		/// by an explicit <c>LoadWith</c>/<c>ThenLoad</c> (that collection only) or a root
+		/// <c>WithUnionLoadStrategy</c>/<c>WithKeyedLoadStrategy</c>/<c>WithSeparateLoadStrategy</c> marker (whole
+		/// query). Default: <see cref="ImplicitCollectionLoading.Allow"/>.
+		/// </summary>
+		[Pure]
+		public static LinqOptions WithImplicitCollectionLoading(this LinqOptions options, ImplicitCollectionLoading implicitCollectionLoading)
+		{
+			return options with { ImplicitCollectionLoading = implicitCollectionLoading };
+		}
+
+		/// <summary>
+		/// Sets the default <see cref="EagerLoadingStrategy"/> used for all LoadWith/ThenLoad eager-loading
+		/// operations when no per-query strategy is set via <c>WithUnionLoadStrategy</c>, <c>WithKeyedLoadStrategy</c>, or <c>WithSeparateLoadStrategy</c>.
+		/// Default: <see cref="EagerLoadingStrategy.Default"/>.
+		/// </summary>
+		[Pure]
+		public static LinqOptions WithDefaultEagerLoadingStrategy(this LinqOptions options, EagerLoadingStrategy eagerLoadingStrategy)
+		{
+			return options with { DefaultEagerLoadingStrategy = eagerLoadingStrategy };
+		}
+
+		/// <summary>
 		/// Used to disable LINQ expressions caching for queries.
 		/// This cache reduces time, required for query parsing but have several side-effects:
 		/// <para />
@@ -216,7 +240,7 @@ namespace LinqToDB
 		/// <para />
 		/// - cache access synchronization could lead to bigger latencies than it saves.
 		/// <para />
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// <para />
 		/// It is not recommended to enable this option as it could lead to severe slowdown. Better approach will be
 		/// to use <see cref="NoLinqCache"/> scope around queries, that produce severe memory leaks you need to fix.
@@ -241,7 +265,7 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Used to generate CROSS APPLY or OUTER APPLY if possible.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -255,7 +279,7 @@ namespace LinqToDB
 		/// Allows SQL generation to automatically transform
 		/// <code>SELECT DISTINCT value FROM Table ORDER BY date</code>
 		/// Into GROUP BY equivalent if syntax is not supported
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -267,7 +291,7 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Enables Take/Skip parameterization.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithParameterizeTakeSkip(this LinqOptions options, bool parameterizeTakeSkip)
@@ -276,7 +300,7 @@ namespace LinqToDB
 		}
 
 		/// <summary>
-		/// If <c>true</c>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
+		/// If <see langword="true"/>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
 		/// Otherwise, <see cref="LinqToDBException"/> will be generated on locked mapping schema edit attempt.
 		/// It is not recommended to enable this option as it has performance implications.
 		/// Proper approach is to create single <see cref="MappingSchema"/> instance once, configure mappings for it and use this <see cref="MappingSchema"/> instance for all context instances.
@@ -289,14 +313,40 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Depending on this option <c>linq2db</c> generates different SQL for <c>sequence.Contains(value)</c>.<br/>
-		/// <c>true</c> - <c>EXISTS (SELECT * FROM sequence WHERE sequence.key = value)</c>.<br/>
-		/// <c>false</c> - <c>value IN (SELECT sequence.key FROM sequence)</c>.<br/>
-		/// Default value: <c>false</c>.
+		/// <see langword="true"/> - <c>EXISTS (SELECT * FROM sequence WHERE sequence.key = value)</c>.<br/>
+		/// <see langword="false"/> - <c>value IN (SELECT sequence.key FROM sequence)</c>.<br/>
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static LinqOptions WithPreferExistsForScalar(this LinqOptions options, bool preferExistsForScalar)
 		{
 			return options with { PreferExistsForScalar = preferExistsForScalar };
+		}
+
+		/// <summary>
+		/// When enabled, computed expressions in the final projection are calculated on the client during
+		/// materialization instead of being translated into additional SQL columns. Expressions that prefer or
+		/// require server-side evaluation (for example, members or methods mapped with
+		/// <see cref="Sql.ExpressionAttribute.PreferServerSide"/> or <see cref="Sql.ExpressionAttribute.ServerSideOnly"/>)
+		/// are still translated to SQL.
+		/// Default value: <see langword="false"/>.
+		/// </summary>
+		[Pure]
+		public static LinqOptions WithPreferClientCalculation(this LinqOptions options, bool preferClientCalculation)
+		{
+			return options with { PreferClientCalculation = preferClientCalculation };
+		}
+
+		/// <summary>
+		/// Enables mapping expression to be compatible with <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior.
+		/// Note that it doesn't switch linq2db to use <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior for
+		/// queries, so this optimization could be used for <see cref="System.Data.CommandBehavior.Default"/> too.
+		/// Default value: <see langword="false"/>.
+		/// </summary>
+		[Pure]
+		public static LinqOptions WithOptimizeForSequentialAccess(this LinqOptions options, bool optimizeForSequentialAccess)
+		{
+			return options with { OptimizeForSequentialAccess = optimizeForSequentialAccess };
 		}
 
 		#endregion
@@ -305,9 +355,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls how group data for LINQ queries ended with GroupBy will be loaded:
-		/// - if <c>true</c> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
-		/// - if <c>false</c> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
+		/// - if <see langword="false"/> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -319,9 +369,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls behavior of <c>linq2db</c> when there is no updateable fields in Update query:
-		/// - if <c>true</c> - query not executed and Update operation returns 0 as number of affected records;
-		/// - if <c>false</c> - <see cref="LinqToDBException"/> will be thrown.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - query not executed and Update operation returns 0 as number of affected records;
+		/// - if <see langword="false"/> - <see cref="LinqToDBException"/> will be thrown.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseIgnoreEmptyUpdate(this DataOptions options, bool ignoreEmptyUpdate)
@@ -335,7 +385,7 @@ namespace LinqToDB
 		/// Test file will be placed to <c>linq2db</c> subfolder of temp folder and exact file path will be logged
 		/// to data connection tracing infrastructure.
 		/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseGenerateExpressionTest(this DataOptions options, bool generateExpressionTest)
@@ -346,7 +396,7 @@ namespace LinqToDB
 		/// <summary>
 		/// Enables logging of generated mapping expression to data connection tracing infrastructure.
 		/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseTraceMapperExpression(this DataOptions options, bool traceMapperExpression)
@@ -357,10 +407,10 @@ namespace LinqToDB
 		/// <summary>
 		/// Controls behavior, when LINQ query chain contains multiple <see cref="System.Linq.Queryable.OrderBy{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> or <see cref="System.Linq.Queryable.OrderByDescending{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> calls:
 		/// <list type="bullet">
-		/// <item>if <c>true</c> - non-first OrderBy* call will be treated as ThenBy* call;</item>
-		/// <item>if <c>false</c> - OrderBy* call will place sort specifications, added by previous OrderBy* and ThenBy* calls, after current call.</item>
+		/// <item>if <see langword="true"/> - non-first OrderBy* call will be treated as ThenBy* call;</item>
+		/// <item>if <see langword="false"/> - OrderBy* call will place sort specifications, added by previous OrderBy* and ThenBy* calls, after current call.</item>
 		/// </list>
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// <para>
 		/// Example:
 		/// <code>
@@ -390,9 +440,9 @@ namespace LinqToDB
 		/// Controls behavior, when LINQ query chain contains multiple
 		/// <see cref="System.Linq.Queryable.OrderBy          {TSource,TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> or
 		/// <see cref="System.Linq.Queryable.OrderByDescending{TSource,TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> calls:
-		/// - if <c>true</c> - non-first OrderBy* call will be treated as ThenBy* call;
-		/// - if <c>false</c> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
-		/// Default value: <c>false</c>.
+		/// - if <see langword="true"/> - non-first OrderBy* call will be treated as ThenBy* call;
+		/// - if <see langword="false"/> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -408,7 +458,7 @@ namespace LinqToDB
 		/// - removes duplicate joins by unique target table key;
 		/// - removes self-joins by unique key;
 		/// - removes left joins if joined table is not used in query.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseOptimizeJoins(this DataOptions options, bool optimizeJoins)
@@ -470,9 +520,9 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Controls behavior of LINQ query, which ends with GroupBy call.
-		/// - if <c>true</c> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
-		/// - if <c>false</c> - eager loading used.
-		/// Default value: <c>true</c>.
+		/// - if <see langword="true"/> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
+		/// - if <see langword="false"/> - eager loading used.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		/// <remarks>
 		/// <a href="https://github.com/linq2db/linq2db/issues/365">More details</a>.
@@ -484,6 +534,30 @@ namespace LinqToDB
 		}
 
 		/// <summary>
+		/// With <see cref="ImplicitCollectionLoading.Throw"/>, an implicit eager load (a collection projected in a <c>Select</c> without
+		/// being explicitly requested) throws <see cref="LinqToDBException"/> at build time. The guard is bypassed
+		/// by an explicit <c>LoadWith</c>/<c>ThenLoad</c> (that collection only) or a root
+		/// <c>WithUnionLoadStrategy</c>/<c>WithKeyedLoadStrategy</c>/<c>WithSeparateLoadStrategy</c> marker (whole
+		/// query). Default: <see cref="ImplicitCollectionLoading.Allow"/>.
+		/// </summary>
+		[Pure]
+		public static DataOptions UseImplicitCollectionLoading(this DataOptions options, ImplicitCollectionLoading implicitCollectionLoading)
+		{
+			return options.WithOptions<LinqOptions>(o => o with { ImplicitCollectionLoading = implicitCollectionLoading });
+		}
+
+		/// <summary>
+		/// Sets the default <see cref="EagerLoadingStrategy"/> used for all LoadWith/ThenLoad eager-loading
+		/// operations when no per-query strategy is set via <c>WithUnionLoadStrategy</c>, <c>WithKeyedLoadStrategy</c>, or <c>WithSeparateLoadStrategy</c>.
+		/// Default: <see cref="EagerLoadingStrategy.Default"/>.
+		/// </summary>
+		[Pure]
+		public static DataOptions UseDefaultEagerLoadingStrategy(this DataOptions options, EagerLoadingStrategy eagerLoadingStrategy)
+		{
+			return options.WithOptions<LinqOptions>(o => o with { DefaultEagerLoadingStrategy = eagerLoadingStrategy });
+		}
+
+		/// <summary>
 		/// Used to disable LINQ expressions caching for queries.
 		/// This cache reduces time, required for query parsing but have several side-effects:
 		/// <para />
@@ -491,7 +565,7 @@ namespace LinqToDB
 		/// <para />
 		/// - cache access synchronization could lead to bigger latencies than it saves.
 		/// <para />
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// <para />
 		/// It is not recommended to enable this option as it could lead to severe slowdown. Better approach will be
 		/// to use <see cref="NoLinqCache"/> scope around queries, that produce severe memory leaks you need to fix.
@@ -516,7 +590,7 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Used to generate CROSS APPLY or OUTER APPLY if possible.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -530,7 +604,7 @@ namespace LinqToDB
 		/// Allows SQL generation to automatically transform
 		/// <code>SELECT DISTINCT value FROM Table ORDER BY date</code>
 		/// Into GROUP BY equivalent if syntax is not supported
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		// TODO: Remove in v7
@@ -542,7 +616,7 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Enables Take/Skip parameterization.
-		/// Default value: <c>true</c>.
+		/// Default value: <see langword="true"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseParameterizeTakeSkip(this DataOptions options, bool parameterizeTakeSkip)
@@ -551,7 +625,7 @@ namespace LinqToDB
 		}
 
 		/// <summary>
-		/// If <c>true</c>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
+		/// If <see langword="true"/>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
 		/// Otherwise, <see cref="LinqToDBException"/> will be generated on locked mapping schema edit attempt.
 		/// It is not recommended to enable this option as it has performance implications.
 		/// Proper approach is to create single <see cref="MappingSchema"/> instance once, configure mappings for it and use this <see cref="MappingSchema"/> instance for all context instances.
@@ -564,14 +638,40 @@ namespace LinqToDB
 
 		/// <summary>
 		/// Depending on this option <c>linq2db</c> generates different SQL for <c>sequence.Contains(value)</c>.<br/>
-		/// <c>true</c> - <c>EXISTS (SELECT * FROM sequence WHERE sequence.key = value)</c>.<br/>
-		/// <c>false</c> - <c>value IN (SELECT sequence.key FROM sequence)</c>.<br/>
-		/// Default value: <c>false</c>.
+		/// <see langword="true"/> - <c>EXISTS (SELECT * FROM sequence WHERE sequence.key = value)</c>.<br/>
+		/// <see langword="false"/> - <c>value IN (SELECT sequence.key FROM sequence)</c>.<br/>
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UsePreferExistsForScalar(this DataOptions options, bool preferExistsForScalar)
 		{
 			return options.WithOptions<LinqOptions>(o => o with { PreferExistsForScalar = preferExistsForScalar });
+		}
+
+		/// <summary>
+		/// When enabled, computed expressions in the final projection are calculated on the client during
+		/// materialization instead of being translated into additional SQL columns. Expressions that prefer or
+		/// require server-side evaluation (for example, members or methods mapped with
+		/// <see cref="Sql.ExpressionAttribute.PreferServerSide"/> or <see cref="Sql.ExpressionAttribute.ServerSideOnly"/>)
+		/// are still translated to SQL.
+		/// Default value: <see langword="false"/>.
+		/// </summary>
+		[Pure]
+		public static DataOptions UsePreferClientCalculation(this DataOptions options, bool preferClientCalculation)
+		{
+			return options.WithOptions<LinqOptions>(o => o with { PreferClientCalculation = preferClientCalculation });
+		}
+
+		/// <summary>
+		/// Enables mapping expression to be compatible with <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior.
+		/// Note that it doesn't switch linq2db to use <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior for
+		/// queries, so this optimization could be used for <see cref="System.Data.CommandBehavior.Default"/> too.
+		/// Default value: <see langword="false"/>.
+		/// </summary>
+		[Pure]
+		public static DataOptions UseOptimizeForSequentialAccess(this DataOptions options, bool optimizeForSequentialAccess)
+		{
+			return options.WithOptions<LinqOptions>(o => o with { OptimizeForSequentialAccess = optimizeForSequentialAccess });
 		}
 
 		#endregion
@@ -963,8 +1063,8 @@ namespace LinqToDB
 		#region DataContextOptions
 
 		/// <summary>
-		/// Command timeout in seconds or <c>null</c> for default timeout.
-		/// Default value: <c>null</c>.
+		/// Command timeout in seconds or <see langword="null"/> for default timeout.
+		/// Default value: <see langword="null"/>.
 		/// </summary>
 		[Pure]
 		public static DataContextOptions WithCommandTimeout(this DataContextOptions options, int? commandTimeout)
@@ -973,8 +1073,8 @@ namespace LinqToDB
 		}
 
 		/// <summary>
-		/// Command timeout in seconds or <c>null</c> for default timeout.
-		/// Default value: <c>null</c>.
+		/// Command timeout in seconds or <see langword="null"/> for default timeout.
+		/// Default value: <see langword="null"/>.
 		/// </summary>
 		[Pure]
 		public static DataOptions UseCommandTimeout(this DataOptions options, int? commandTimeout)
@@ -1648,6 +1748,16 @@ namespace LinqToDB
 			return options with { WithoutSession = withoutSession };
 		}
 
+		/// <summary>
+		/// Specifies the action to take when conflicts occur during bulk copy operation.
+		/// See <see cref="ConflictAction"/> for more details on supported databases and compatibility.
+		/// </summary>
+		[Pure]
+		public static BulkCopyOptions WithConflictAction(this BulkCopyOptions options, ConflictAction conflictAction)
+		{
+			return options with { ConflictAction = conflictAction };
+		}
+
 		#endregion
 
 		#region DataOptions.BulkCopyOptions
@@ -1888,13 +1998,23 @@ namespace LinqToDB
 			return options.WithOptions<BulkCopyOptions>(o => o with { WithoutSession = withoutSession });
 		}
 
+		/// <summary>
+		/// Specifies the action to take when conflicts occur during bulk copy operation.
+		/// See <see cref="ConflictAction"/> for more details on supported databases and compatibility.
+		/// </summary>
+		[Pure]
+		public static DataOptions UseBulkCopyConflictAction(this DataOptions options, ConflictAction conflictAction)
+		{
+			return options.WithOptions<BulkCopyOptions>(o => o with { ConflictAction = conflictAction });
+		}
+
 		#endregion
 
 		#region SqlOptions
 
 		/// <summary>
-		/// If <c>true</c>, linq2db will allow any constant expressions in ORDER BY clause.
-		/// Default value: <c>false</c>.
+		/// If <see langword="true"/>, linq2db will allow any constant expressions in ORDER BY clause.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		public static SqlOptions WithEnableConstantExpressionInOrderBy(this SqlOptions options, bool enableConstantExpressionInOrderBy)
 		{
@@ -1905,7 +2025,7 @@ namespace LinqToDB
 		/// Indicates whether SQL Builder should generate aliases for final projection.
 		/// It is not required for correct query processing but simplifies SQL analysis.
 		/// <para>
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </para>
 		/// <example>
 		/// For the query
@@ -1916,7 +2036,7 @@ namespace LinqToDB
 		///       TrackId = child.ChildID,
 		///	   };
 		/// </code>
-		/// When property is <c>true</c>
+		/// When property is <see langword="true"/>
 		/// <code>
 		/// SELECT
 		///	   [child].[ChildID] as [TrackId]
@@ -1937,13 +2057,23 @@ namespace LinqToDB
 			return options with { GenerateFinalAliases = generateFinalAliases };
 		}
 
+		/// <summary>
+		/// Default position of <c>NULL</c> values in an <c>ORDER BY</c> clause for ordering keys that do not specify
+		/// a <see cref="Sql.NullsPosition"/> explicitly.
+		/// Default value: <see cref="Sql.NullsPosition.None"/>.
+		/// </summary>
+		public static SqlOptions WithDefaultNullsPosition(this SqlOptions options, Sql.NullsPosition defaultNullsPosition)
+		{
+			return options with { DefaultNullsPosition = defaultNullsPosition };
+		}
+
 		#endregion
 
 		#region DataOptions.SqlOptions
 
 		/// <summary>
-		/// If <c>true</c>, linq2db will allow any constant expressions in ORDER BY clause.
-		/// Default value: <c>false</c>.
+		/// If <see langword="true"/>, linq2db will allow any constant expressions in ORDER BY clause.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		public static DataOptions UseEnableConstantExpressionInOrderBy(this DataOptions options, bool enableConstantExpressionInOrderBy)
 		{
@@ -1954,7 +2084,7 @@ namespace LinqToDB
 		/// Indicates whether SQL Builder should generate aliases for final projection.
 		/// It is not required for correct query processing but simplifies SQL analysis.
 		/// <para>
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </para>
 		/// <example>
 		/// For the query
@@ -1965,7 +2095,7 @@ namespace LinqToDB
 		///       TrackId = child.ChildID,
 		///	   };
 		/// </code>
-		/// When property is <c>true</c>
+		/// When property is <see langword="true"/>
 		/// <code>
 		/// SELECT
 		///	   [child].[ChildID] as [TrackId]
@@ -1984,6 +2114,16 @@ namespace LinqToDB
 		public static DataOptions UseGenerateFinalAliases(this DataOptions options, bool generateFinalAliases)
 		{
 			return options.WithOptions<SqlOptions>(o => o with { GenerateFinalAliases = generateFinalAliases });
+		}
+
+		/// <summary>
+		/// Default position of <c>NULL</c> values in an <c>ORDER BY</c> clause for ordering keys that do not specify
+		/// a <see cref="Sql.NullsPosition"/> explicitly.
+		/// Default value: <see cref="Sql.NullsPosition.None"/>.
+		/// </summary>
+		public static DataOptions UseDefaultNullsPosition(this DataOptions options, Sql.NullsPosition defaultNullsPosition)
+		{
+			return options.WithOptions<SqlOptions>(o => o with { DefaultNullsPosition = defaultNullsPosition });
 		}
 
 		#endregion

@@ -19,8 +19,7 @@ namespace Tests.UserTests
 	[TestFixture]
 	public class Issue4336Tests : TestBase
 	{
-		// bug in informix
-		[ThrowsForProvider(typeof(DB2Exception), TestProvName.AllInformix, ErrorMessage = "ERROR [IX000] [IBM][IDS/UNIX64] Internal error in routine opjoin().")]
+		[ActiveIssue(5590, Configuration = TestProvName.AllYdb, Details = "YDB lacks correlated subquery / OUTER APPLY support")]
 		[Test]
 		public void Issue4336Test([DataSources(TestProvName.AllAccess)] string context)
 		{

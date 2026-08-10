@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 
 using LinqToDB.Internal.Linq.Builder;
@@ -56,7 +58,7 @@ namespace LinqToDB.Internal.Expressions
 			return AdjustType(expression, Type, MappingSchema);
 		}
 
-		public bool Equals(SqlAdjustTypeExpression? other)
+		public bool Equals([NotNullWhen(true)] SqlAdjustTypeExpression? other)
 		{
 			if (ReferenceEquals(null, other))
 			{
@@ -71,7 +73,7 @@ namespace LinqToDB.Internal.Expressions
 			return _type.Equals(other._type) && ExpressionEqualityComparer.Instance.Equals(Expression, other.Expression);
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			if (ReferenceEquals(null, obj))
 			{
@@ -106,6 +108,7 @@ namespace LinqToDB.Internal.Expressions
 			return !Equals(left, right);
 		}
 
+		[DebuggerStepThrough]
 		protected override Expression Accept(ExpressionVisitor visitor)
 		{
 			if (visitor is ExpressionVisitorBase baseVisitor)

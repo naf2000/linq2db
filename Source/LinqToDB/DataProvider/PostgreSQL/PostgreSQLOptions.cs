@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using LinqToDB.Data;
 using LinqToDB.Internal.Common;
@@ -22,7 +23,7 @@ namespace LinqToDB.DataProvider.PostgreSQL
 	/// <item>Use <see cref="DateTimeKind.Utc"/> for <see cref="DateTime"/> timestamptz values</item>
 	/// <item>Use <see cref="DateTimeKind.Unspecified"/> for <see cref="DateTime"/> timestamp values with <see cref="DateTimeKind.Utc"/> kind</item>
 	/// </list>
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	/// <param name="IdentifierQuoteMode">
 	/// Specify identifiers quotation logic for SQL generation.
@@ -55,7 +56,7 @@ namespace LinqToDB.DataProvider.PostgreSQL
 
 		#region IEquatable implementation
 
-		public bool Equals(PostgreSQLOptions? other)
+		public bool Equals([NotNullWhen(true)] PostgreSQLOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

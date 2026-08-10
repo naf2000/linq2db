@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Linq.Expressions;
@@ -6,6 +7,7 @@ using System.Reflection;
 
 using LinqToDB.Common;
 using LinqToDB.Data;
+using LinqToDB.Expressions;
 using LinqToDB.Internal.Expressions;
 using LinqToDB.Internal.Extensions;
 using LinqToDB.Internal.Mapping;
@@ -36,18 +38,12 @@ namespace LinqToDB.Mapping
 			MemberInfo            = memberAccessor.MemberInfo;
 			HasInheritanceMapping = hasInheritanceMapping;
 
-			if (MemberInfo.IsFieldEx())
+			MemberType = MemberInfo switch
 			{
-				var fieldInfo = (FieldInfo)MemberInfo;
-				MemberType    = fieldInfo.FieldType;
-			}
-			else if (MemberInfo.IsPropertyEx())
-			{
-				var propertyInfo = (PropertyInfo)MemberInfo;
-				MemberType       = propertyInfo.PropertyType;
-			}
-			else
-				throw new LinqToDBException($"Column should be mapped to property of field. Was: {MemberInfo.GetType()}.");
+				FieldInfo { MemberType: MemberTypes.Field } fi => fi.FieldType,
+				PropertyInfo { MemberType: MemberTypes.Property } pi => pi.PropertyType,
+				_ => throw new LinqToDBException($"Column should be mapped to property of field. Was: {MemberInfo.GetType()}."),
+			};
 
 			var dataType = mappingSchema.GetDataType(MemberType);
 			if (dataType.Type.DataType == DataType.Undefined)
@@ -95,7 +91,7 @@ namespace LinqToDB.Mapping
 			{
 				IsIdentity = columnAttribute.IsIdentity;
 			}
-			else if (MemberName.IndexOf('.') < 0)
+			else if (MemberName.IndexOf('.', StringComparison.Ordinal) < 0)
 			{
 				var hasIdentity = mappingSchema.HasAttribute<IdentityAttribute>(MemberAccessor.TypeAccessor.Type, MemberInfo);
 				if (hasIdentity)
@@ -114,7 +110,7 @@ namespace LinqToDB.Mapping
 
 			if (columnAttribute?.HasIsPrimaryKey() == true)
 				IsPrimaryKey = columnAttribute.IsPrimaryKey;
-			else if (MemberName.IndexOf('.') < 0)
+			else if (MemberName.IndexOf('.', StringComparison.Ordinal) < 0)
 			{
 				var a = mappingSchema.GetAttribute<PrimaryKeyAttribute>(MemberAccessor.TypeAccessor.Type, MemberInfo);
 
@@ -263,7 +259,7 @@ namespace LinqToDB.Mapping
 		/// <summary>
 		/// Gets whether a column contains a discriminator value for a LINQ to DB inheritance hierarchy.
 		/// <see cref="InheritanceMappingAttribute"/> for more details.
-		/// Default value: <c>false</c>.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		public bool           IsDiscriminator { get; }
 
@@ -291,20 +287,20 @@ namespace LinqToDB.Mapping
 		public bool           SkipOnInsert    { get; }
 
 		/// <summary>
-		/// Gets whether a column must be explicitly defined in a Select statement to be fetched. If <c>true</c>, a "SELECT *"-ish statement won't retrieve this column.
-		/// Default value: <c>false</c>.
+		/// Gets whether a column must be explicitly defined in a Select statement to be fetched. If <see langword="true"/>, a "SELECT *"-ish statement won't retrieve this column.
+		/// Default value: <see langword="false"/>.
 		/// </summary>
 		public bool           SkipOnEntityFetch { get; }
 
 		/// <summary>
 		/// Gets whether the column has specific values that should be skipped on insert.
 		/// </summary>
-		public bool           HasValuesToSkipOnInsert => SkipBaseAttributes?.Any(s => (s.Affects & SkipModification.Insert) != 0) ?? false;
+		public bool           HasValuesToSkipOnInsert => SkipBaseAttributes?.Any(s => s.Affects.HasFlag(SkipModification.Insert)) ?? false;
 
 		/// <summary>
 		/// Gets whether the column has specific values that should be skipped on update.
 		/// </summary>
-		public bool           HasValuesToSkipOnUpdate => SkipBaseAttributes?.Any(s => (s.Affects & SkipModification.Update) != 0) ?? false;
+		public bool           HasValuesToSkipOnUpdate => SkipBaseAttributes?.Any(s => s.Affects.HasFlag(SkipModification.Update)) ?? false;
 
 		/// <summary>
 		/// Gets whether the column has specific values that should be skipped on insert.
@@ -322,7 +318,7 @@ namespace LinqToDB.Mapping
 		/// <param name="obj">The object containing the values for the operation.</param>
 		/// <param name="descriptor"><see cref="EntityDescriptor"/> of the current instance.</param>
 		/// <param name="flags">The flags that specify which operation should be checked.</param>
-		/// <returns><c>true</c> if object contains values that should be skipped. </returns>
+		/// <returns><see langword="true"/> if object contains values that should be skipped. </returns>
 		public virtual bool ShouldSkip(object obj, EntityDescriptor descriptor, SkipModification flags)
 		{
 			if (SkipBaseAttributes == null)
@@ -422,7 +418,13 @@ namespace LinqToDB.Mapping
 			DbDataType? dbDataType = null;
 
 			if (completeDataType && dataType == DataType.Undefined)
-				dbDataType = CalculateDbDataType(MappingSchema, systemType);
+				// When a ValueConverter is present, resolve the DB type from the converter's *provider* type
+				// against this descriptor's (active, provider-inclusive) MappingSchema rather than the member
+				// type - so e.g. an F# 'decimal option' (provider type Nullable<decimal>) picks up the
+				// provider's decimal(18,10) and 'string option' the provider's preferred string type. The
+				// member type often has no DB type of its own (the converter is what maps it to a column).
+				// Falls back to the member type when there is no converter.
+				dbDataType = CalculateDbDataType(MappingSchema, ValueConverter?.ToProviderExpression.Body.Type ?? systemType);
 
 			return new DbDataType(systemType, dbDataType?.DataType ?? dataType, DbType ?? dbDataType?.DbType, Length ?? dbDataType?.Length, Precision ?? dbDataType?.Precision, Scale ?? dbDataType?.Scale);
 		}
@@ -660,6 +662,11 @@ namespace LinqToDB.Mapping
 		/// <returns>Expression with applied conversions.</returns>
 		public static Expression ApplyConversions(MappingSchema mappingSchema, Expression getterExpr, DbDataType dbDataType, IValueConverter? valueConverter, bool includingEnum)
 		{
+			return ApplyConversions(mappingSchema, getterExpr, dbDataType, valueConverter, includingEnum, canBeNull: false);
+		}
+
+		private static Expression ApplyConversions(MappingSchema mappingSchema, Expression getterExpr, DbDataType dbDataType, IValueConverter? valueConverter, bool includingEnum, bool canBeNull)
+		{
 			// search for type preparation converter
 			var prepareConverter = mappingSchema.GetConvertExpression(getterExpr.Type, getterExpr.Type, false, false, ConversionType.ToDatabase);
 
@@ -674,8 +681,15 @@ namespace LinqToDB.Mapping
 
 				if (assignable || fromType.IsAssignableFrom(getterExpr.Type.UnwrapNullableType()))
 				{
-					if (!valueConverter.HandlesNulls && getterExpr.Type.IsNullableOrReferenceType())
+					if (!valueConverter.HandlesNulls && getterExpr.Type.IsNullableOrReferenceType)
 					{
+						if (canBeNull && !toProvider.Body.Type.IsNullableOrReferenceType)
+						{
+							toProvider = Expression.Lambda(
+								Expression.Convert(toProvider.Body, toProvider.Body.Type.AsNullable()),
+								toProvider.Parameters);
+						}
+
 						toProvider = mappingSchema.AddNullCheck(toProvider);
 					}
 
@@ -761,8 +775,17 @@ namespace LinqToDB.Mapping
 		/// <returns>Expression with applied conversions.</returns>
 		public Expression ApplyConversions(Expression getterExpr, DbDataType dbDataType, bool includingEnum)
 		{
-			return ApplyConversions(MappingSchema, getterExpr, dbDataType, ValueConverter, includingEnum);
+			return ApplyConversions(MappingSchema, getterExpr, dbDataType, ValueConverter, includingEnum, CanBeNull);
 		}
+
+		List<ColumnDescriptor>? _valueSiblings;
+
+		/// <summary>
+		/// Registers another inheritance-mapped column that maps a distinct member to the same physical
+		/// column as this one. Lets <see cref="GetProviderValue"/> read the value from the member matching
+		/// the row's runtime type, so inserts of a base-typed (mixed) source write shared columns correctly.
+		/// </summary>
+		internal void AddValueSibling(ColumnDescriptor sibling) => (_valueSiblings ??= new()).Add(sibling);
 
 		/// <summary>
 		/// Extracts column value, converted to database type, from entity object.
@@ -775,15 +798,53 @@ namespace LinqToDB.Mapping
 			{
 				var objParam      = Expression.Parameter(typeof(object), "obj");
 
-				var objExpression = Expression.Convert(objParam, MemberAccessor.TypeAccessor.Type);
+				// A column inherited from an abstract intermediate type is owned by the member's declaring
+				// type, which every concrete subtype shares. Guarding/casting by the single concrete entity
+				// type would exclude sibling subtypes, so a base-typed (mixed) insert would write the default
+				// for them. Widen to the declaring type for inheritance-mapped columns.
+				var entityType    = MemberAccessor.TypeAccessor.Type;
+				if (HasInheritanceMapping
+					&& MemberAccessor.MemberInfo.DeclaringType is { } declaringType
+					&& declaringType != entityType
+					&& declaringType.IsAssignableFrom(entityType))
+				{
+					entityType = declaringType;
+				}
+
+				var objExpression = Expression.Convert(objParam, entityType);
 				var getterExpr    = InternalExtensions.ApplyLambdaToExpression(GetDbValueLambda(), objExpression);
 
 				if (HasInheritanceMapping)
 				{
+					// The column value belongs to a specific entity type. When several sibling types map
+					// distinct members to the same physical column, pick the value from the member matching
+					// the row's runtime type; for any other type write the default. Without this, a
+					// base-typed (mixed) insert writes the default for every non-primary sibling row.
+					Expression elseExpr = GetDefaultDbValueExpression();
+
+					// The value-sibling chain below is only reached when TypeIs(obj, entityType) is false.
+					// Declaring-type widening above and the sibling chain are mutually exclusive on a given
+					// physical column in current TPH models: a shared column is reached either via one
+					// inherited (widened) member or via distinct sibling members, never both. If a future
+					// mapping ever targets one physical column with both an inherited shared member (which
+					// widens entityType so TypeIs is true for all subtypes) AND value-siblings, this branch
+					// becomes unreachable and those sibling rows would write the default — revisit then.
+					if (_valueSiblings != null)
+					{
+						foreach (var sibling in _valueSiblings)
+						{
+							var siblingType = sibling.MemberAccessor.TypeAccessor.Type;
+							var siblingExpr = InternalExtensions.ApplyLambdaToExpression(
+								sibling.GetDbValueLambda(), Expression.Convert(objParam, siblingType));
+
+							elseExpr = Expression.Condition(Expression.TypeIs(objParam, siblingType), siblingExpr, elseExpr);
+						}
+					}
+
 					// Additional check that column member belong to proper entity
 					//
-					getterExpr = Expression.Condition(Expression.TypeIs(objParam, MemberAccessor.TypeAccessor.Type),
-						getterExpr, GetDefaultDbValueExpression());
+					getterExpr = Expression.Condition(Expression.TypeIs(objParam, entityType),
+						getterExpr, elseExpr);
 				}
 
 				var getterLambda = Expression.Lambda<Func<object, object>>(Expression.Convert(getterExpr, typeof(object)), objParam);

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 using LinqToDB.Internal.Linq.Builder;
 using LinqToDB.Internal.SqlQuery;
@@ -24,19 +25,19 @@ namespace LinqToDB
 				return $"{Type}:{ID}";
 			}
 
-			public override bool Equals(object? obj)
+			public override bool Equals([NotNullWhen(true)] object? obj)
 			{
 				return obj is SqlID other && Equals(other);
 			}
 
 			public bool Equals(SqlID other)
 			{
-				return Type == other.Type && ID == other.ID;
+				return Type == other.Type && string.Equals(ID, other.ID, StringComparison.Ordinal);
 			}
 
 			public override int GetHashCode()
 			{
-				return (int)Type | (ID.GetHashCode() >> 3);
+				return HashCode.Combine(Type, ID);
 			}
 
 			public ISqlExpression ToSql(object value)
@@ -46,7 +47,7 @@ namespace LinqToDB
 
 			public static SqlID Parse(string value)
 			{
-				var idx = value.IndexOf(':');
+				var idx = value.IndexOf(':', StringComparison.Ordinal);
 
 				if (idx == -1)
 					throw new InvalidOperationException($"Cannot parse '{value}' to SqlID.");
@@ -54,9 +55,11 @@ namespace LinqToDB
 				var type = value.Substring(0, idx);
 				var id   = value.Substring(idx + 1);
 
-#pragma warning disable CA2263 // Prefer generic overload when type is known
+#if NET8_0_OR_GREATER
+				return new (Enum.Parse<SqlIDType>(type), id);
+#else
 				return new ((SqlIDType)Enum.Parse(typeof(SqlIDType), type), id);
-#pragma warning restore CA2263 // Prefer generic overload when type is known
+#endif
 			}
 		}
 

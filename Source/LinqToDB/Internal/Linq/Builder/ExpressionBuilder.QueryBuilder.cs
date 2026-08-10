@@ -168,6 +168,17 @@ namespace LinqToDB.Internal.Linq.Builder
 			}
 		}
 
+		/// <summary>
+		/// Set while eager-load processing recursively builds a preamble sub-query, so the nested
+		/// <see cref="FinalizeProjection{T}"/> calls skip the <c>ImplicitCollectionLoading</c> guard —
+		/// those loads were already validated on the top-level query.
+		/// </summary>
+		bool _inEagerLoadProcessing;
+
+		/// <summary>
+		/// Finalizes the query projection: resolves constructors, processes eager loads, and applies the
+		/// strategy-determined finalizer (e.g. <c>ToColumns</c> for Default/KeyedQuery, identity for CteUnion).
+		/// </summary>
 		Expression FinalizeProjection<T>(
 			IBuildContext       context,
 			Expression          expression,
@@ -175,28 +186,40 @@ namespace LinqToDB.Internal.Linq.Builder
 			ref List<Preamble>? preambles,
 			Expression[]        previousKeys)
 		{
-			// Quick shortcut for non-queries
 			if (expression.NodeType == ExpressionType.Default)
 				return expression;
 
-			// convert all missed references
-			
-			var postProcessed = FinalizeConstructors(context, expression);
+			var postProcessed  = FinalizeConstructors(context, expression);
 
-			// process eager loading queries
-			var correctedEager = CompleteEagerLoadingExpressions(postProcessed, context, queryParameter, ref preambles, previousKeys);
-
-			if (SequenceHelper.HasError(correctedEager))
-				return correctedEager;
-
-			if (!ExpressionEqualityComparer.Instance.Equals(correctedEager, postProcessed))
+			if (DataContext.Options.LinqOptions.ImplicitCollectionLoading == ImplicitCollectionLoading.Throw && !_inEagerLoadProcessing && context.TranslationModifier.EagerLoadingStrategy == null)
 			{
-				// convert all missed references
-				postProcessed = FinalizeConstructors(context, correctedEager);
+				// Strict mode: reject implicit collection eager loads (those not explicitly marked via LoadWith/ThenLoad).
+				// A per-query With*LoadStrategy marker sets a strategy on the context modifier and opts the whole query in.
+				// Guarded only for the top-level user query — the recursive preamble sub-query builds that
+				// eager-load processing performs (below) re-build already-authorized loads (e.g. a LoadWith
+				// load-function's nested collection) and would otherwise re-trip the guard without marker context.
+				new ImplicitEagerLoadGuardVisitor().Visit(postProcessed);
 			}
 
-			var withColumns = ToColumns(context.GetResultQuery(), postProcessed);
-			return withColumns;
+			var savedInEagerLoadProcessing = _inEagerLoadProcessing;
+			_inEagerLoadProcessing = true;
+
+			try
+			{
+				var correctedEager = CompleteEagerLoadingExpressions(postProcessed, context, queryParameter, ref preambles, previousKeys, out var finalizer);
+
+				if (SequenceHelper.HasError(correctedEager))
+					return correctedEager;
+
+				if (!ExpressionEqualityComparer.Instance.Equals(correctedEager, postProcessed))
+					postProcessed = FinalizeConstructors(context, correctedEager);
+
+				return finalizer(postProcessed);
+			}
+			finally
+			{
+				_inEagerLoadProcessing = savedInEagerLoadProcessing;
+			}
 		}
 
 		public sealed class ParentInfo
@@ -526,7 +549,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					{
 						NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked,
 						Method: null,
-						Operand: SqlPlaceholderExpression convertPlaceholder
+						Operand: SqlPlaceholderExpression convertPlaceholder,
 					} ue
 					&& ue.Type != typeof(object) && ue.Type != typeof(Enum))
 				{
@@ -552,7 +575,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 					var canBeNull = nullability.CanBeNull(placeholder.Sql) || placeholder.Type.IsNullableType;
 
-					if (canBeNull && valueType != placeholder.Type && !valueType.IsNullableOrReferenceType())
+					if (canBeNull && valueType != placeholder.Type && !valueType.IsNullableOrReferenceType)
 					{
 						valueType = valueType.AsNullable();
 					}
@@ -584,15 +607,15 @@ namespace LinqToDB.Internal.Linq.Builder
 					return new TransformInfo(readerExpression);
 				}
 
-				if (e.NodeType == ExpressionType.Equal || e.NodeType == ExpressionType.NotEqual)
+				if (e.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
 				{
 					var binary = (BinaryExpression)e;
-					if (binary.Left.IsNullValue() && binary.Right is SqlPlaceholderExpression placeholderRight)
+					if (binary is { Left.IsNullValue: true, Right: SqlPlaceholderExpression placeholderRight })
 					{
 						return new TransformInfo(new SqlReaderIsNullExpression(placeholderRight, e.NodeType == ExpressionType.NotEqual), false, true);
 					}
 
-					if (binary.Right.IsNullValue() && binary.Left is SqlPlaceholderExpression placeholderLeft)
+					if (binary is { Right.IsNullValue: true, Left: SqlPlaceholderExpression placeholderLeft })
 					{
 						return new TransformInfo(new SqlReaderIsNullExpression(placeholderLeft, e.NodeType == ExpressionType.NotEqual), false, true);
 					}

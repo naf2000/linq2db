@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 using JetBrains.Annotations;
 
@@ -48,16 +49,16 @@ namespace LinqToDB
 		[Pure]
 		public override DataOptions WithOptions(IOptionSet options)
 		{
-			switch (options)
+			return options switch
 			{
-				case LinqOptions        lo  : return ReferenceEquals(LinqOptions,        lo)  ? this : new(this) { LinqOptions        = lo  };
-				case ConnectionOptions  co  : return ReferenceEquals(ConnectionOptions,  co)  ? this : new(this) { ConnectionOptions  = co  };
-				case DataContextOptions dco : return ReferenceEquals(DataContextOptions, dco) ? this : new(this) { DataContextOptions = dco };
-				case SqlOptions         so  : return ReferenceEquals(SqlOptions,         so)  ? this : new(this) { SqlOptions         = so  };
-				case BulkCopyOptions    bco : return ReferenceEquals(BulkCopyOptions,    bco) ? this : new(this) { BulkCopyOptions    = bco };
-				case RetryPolicyOptions rp  : return ReferenceEquals(RetryPolicyOptions, rp)  ? this : new(this) { RetryPolicyOptions = rp  };
-				default                     : return base.WithOptions(options);
-			}
+				LinqOptions        lo  => ReferenceEquals(LinqOptions,        lo)  ? this : new(this) { LinqOptions        = lo  },
+				ConnectionOptions  co  => ReferenceEquals(ConnectionOptions,  co)  ? this : new(this) { ConnectionOptions  = co  },
+				DataContextOptions dco => ReferenceEquals(DataContextOptions, dco) ? this : new(this) { DataContextOptions = dco },
+				SqlOptions         so  => ReferenceEquals(SqlOptions,         so)  ? this : new(this) { SqlOptions         = so  },
+				BulkCopyOptions    bco => ReferenceEquals(BulkCopyOptions,    bco) ? this : new(this) { BulkCopyOptions    = bco },
+				RetryPolicyOptions rp  => ReferenceEquals(RetryPolicyOptions, rp)  ? this : new(this) { RetryPolicyOptions = rp  },
+				_                      => base.WithOptions(options),
+			};
 		}
 
 		public LinqOptions        LinqOptions        { get => field ??= LinqOptions.       Default; private set; }
@@ -247,7 +248,7 @@ namespace LinqToDB
 			}
 		}
 
-		public bool Equals(DataOptions? other)
+		public bool Equals([NotNullWhen(true)] DataOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;
@@ -255,7 +256,7 @@ namespace LinqToDB
 			return ((IConfigurationID)this).ConfigurationID == ((IConfigurationID)other).ConfigurationID;
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			return obj is DataOptions o && Equals(o);
 		}

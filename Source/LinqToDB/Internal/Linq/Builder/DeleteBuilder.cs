@@ -16,7 +16,7 @@ namespace LinqToDB.Internal.Linq.Builder
 	sealed class DeleteBuilder : MethodCallBuilder
 	{
 		public static bool CanBuildMethod(MethodCallExpression call)
-			=> call.IsQueryable();
+			=> call.IsQueryable;
 
 		protected override BuildSequenceResult BuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 		{
@@ -46,7 +46,7 @@ namespace LinqToDB.Internal.Linq.Builder
 			if (tableContext == null)
 				throw new InvalidOperationException("Cannot find target table for DELETE statement");
 
-			deleteStatement.Table = tableContext.SqlTable;
+			deleteStatement.Table = tableContext.NamedTable;
 
 			static LambdaExpression BuildDefaultOutputExpression(Type outputType)
 			{
@@ -61,18 +61,21 @@ namespace LinqToDB.Internal.Linq.Builder
 			{
 				outputExpression =
 					(LambdaExpression?)methodCall.GetArgumentByName("outputExpression")?.Unwrap()
-					?? BuildDefaultOutputExpression(methodCall.Method.GetGenericArguments().Last());
+					?? BuildDefaultOutputExpression(methodCall.Method.GetGenericArguments()[^1]);
 
 				deleteStatement.Output = new SqlOutputClause();
 
-				var deletedTable = deleteStatement.Table;
+				if (deleteStatement.Table is not SqlTable deletedTable)
+					return BuildSequenceResult.Error(methodCall, "Output is only supported for simple table deletes.");
 
 				// create separate query for output
 				var outputSelectQuery = new SelectQuery();
 
-				deletedContext = new AnchorContext(null,
+				deletedContext = new AnchorContext(
+					parent: null,
 					new TableBuilder.TableContext(sequence.TranslationModifier, builder, sequence.MappingSchema, outputSelectQuery, deletedTable, false),
-					SqlAnchor.AnchorKindEnum.Deleted);
+					SqlAnchor.AnchorKindEnum.Deleted
+				);
 
 				if (deleteType == DeleteContext.DeleteTypeEnum.DeleteOutputInto)
 				{
@@ -93,7 +96,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 					UpdateBuilder.InitializeSetExpressions(builder, destinationContext, sequence, outputExpressions, deleteStatement.Output.OutputItems, createColumns : false);
 
-					deleteStatement.Output.OutputTable = destinationContext.SqlTable;
+					deleteStatement.Output.OutputTable = destinationContext.NamedTable;
 				}
 			}
 

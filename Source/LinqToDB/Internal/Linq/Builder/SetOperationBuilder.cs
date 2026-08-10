@@ -15,44 +15,45 @@ namespace LinqToDB.Internal.Linq.Builder
 	internal sealed class SetOperationBuilder : MethodCallBuilder
 	{
 		public static bool CanBuildMethod(MethodCallExpression call)
-			=> call.Arguments.Count == 2 && call.IsQueryable();
+			=> call is { IsQueryable: true, Arguments.Count: 2 };
 
 		#region Builder
 
 		protected override BuildSequenceResult BuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 		{
-			var buildResult1 = builder.TryBuildSequence(new BuildInfo(buildInfo, methodCall.Arguments[0]));
+			// Both set sides are independent of any post-set-operation OrderBy. Isolate so
+			// per-side OrderBys don't leak into the outer state consumed by CteUnion.
+			BuildSequenceResult buildResult1;
+			using (builder.IsolateOrderBy())
+				buildResult1 = builder.TryBuildSequence(new BuildInfo(buildInfo, methodCall.Arguments[0]));
 			if (buildResult1.BuildContext == null)
 				return buildResult1;
 
-			var buildResult2 = builder.TryBuildSequence(new BuildInfo(buildInfo, methodCall.Arguments[1], new SelectQuery()));
+			BuildSequenceResult buildResult2;
+			using (builder.IsolateOrderBy())
+				buildResult2 = builder.TryBuildSequence(new BuildInfo(buildInfo, methodCall.Arguments[1], new SelectQuery()));
 			if (buildResult2.BuildContext == null)
 				return buildResult2;
 
 			var sequence1 = buildResult1.BuildContext;
 			var sequence2 = buildResult2.BuildContext;
 
-			SetOperation setOperation;
-			switch (methodCall.Method.Name)
+			var setOperation = methodCall.Method.Name switch
 			{
-				case "Concat"       :
-				case "UnionAll"     : setOperation = SetOperation.UnionAll;     break;
-				case "Union"        : setOperation = SetOperation.Union;        break;
-				case "Except"       : setOperation = SetOperation.Except;       break;
-				case "ExceptAll"    : setOperation = SetOperation.ExceptAll;    break;
-				case "Intersect"    : setOperation = SetOperation.Intersect;    break;
-				case "IntersectAll" : setOperation = SetOperation.IntersectAll; break;
-				default:
-					throw new ArgumentException($"Invalid method name {methodCall.Method.Name}.");
-			}
+				"Concat" or "UnionAll" => SetOperation.UnionAll,
+				"Union"                => SetOperation.Union,
+				"Except"               => SetOperation.Except,
+				"ExceptAll"            => SetOperation.ExceptAll,
+				"Intersect"            => SetOperation.Intersect,
+				"IntersectAll"         => SetOperation.IntersectAll,
+				_ => throw new ArgumentException($"Invalid method name {methodCall.Method.Name}."),
+			};
 
 			var elementType = methodCall.Method.GetGenericArguments()[0];
 
-			var needsEmulation = !builder.DataContext.SqlProviderFlags.IsAllSetOperationsSupported &&
-			                     (setOperation is SetOperation.ExceptAll or SetOperation.IntersectAll)
-			                     ||
-			                     !builder.DataContext.SqlProviderFlags.IsDistinctSetOperationsSupported &&
-			                     (setOperation is SetOperation.Except or SetOperation.Intersect);
+			var needsEmulation =
+				(!builder.DataContext.SqlProviderFlags.IsAllSetOperationsSupported && setOperation is SetOperation.ExceptAll or SetOperation.IntersectAll)
+				|| (!builder.DataContext.SqlProviderFlags.IsDistinctSetOperationsSupported && setOperation is SetOperation.Except or SetOperation.Intersect);
 
 			var set1 = new SubQueryContext(sequence1);
 			var set2 = new SubQueryContext(sequence2);
@@ -122,7 +123,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			public override Expression MakeExpression(Expression path, ProjectFlags flags)
 			{
-				if (flags.IsRoot() || flags.IsTraverse() || flags.IsAggregationRoot() || flags.IsAssociationRoot() || flags.IsTable())
+				if (flags.IsRoot() || flags.IsTraverse() || flags.IsAggregationRoot() || flags.IsAssociationRoot() || flags.IsTable() || flags.IsSubquery())
 					return path;
 
 				if (_setIdReference != null && ExpressionEqualityComparer.Instance.Equals(_setIdReference, path))
@@ -335,7 +336,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 			static Expression MakeNullCondition(SqlPathExpression path, bool isNotNull)
 			{
-				if (!path.Type.IsNullableOrReferenceType())
+				if (!path.Type.IsNullableOrReferenceType)
 				{
 					path = path.WithType(path.Type.AsNullable());
 				}
@@ -358,16 +359,16 @@ namespace LinqToDB.Internal.Linq.Builder
 					{
 						if (!column1.Expression.CanBeNullable(nullability1))
 						{
-							if (QueryHelper.IsNullValue(column2.Expression))
+							if (column2.Expression.IsNullValue)
 							{
-								return MakeNullCondition(new SqlPathExpression(map.Key, placeholder1.Type), isLeft == true);
+								return MakeNullCondition(new SqlPathExpression(map.Key, placeholder1.Type), isNotNull: isLeft);
 							}
 
 						}
 						else if (!column2.Expression.CanBeNullable(nullability2))
 						{
-							if (QueryHelper.IsNullValue(column1.Expression))
-								return MakeNullCondition(new SqlPathExpression(map.Key, placeholder2.Type), isLeft == false);
+							if (column1.Expression.IsNullValue)
+								return MakeNullCondition(new SqlPathExpression(map.Key, placeholder2.Type), isNotNull: !isLeft);
 						}
 					}
 				}
@@ -487,7 +488,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 					var placeholder1 = placeholder;
 
-					var (placeholder2, _) = placeholders2.FirstOrDefault(p2 => PathComparer.Instance.Equals(p2.path, path));
+					var (placeholder2, _) = placeholders2.Find(p2 => PathComparer.Instance.Equals(p2.path, path));
 					if (placeholder2 == null)
 					{
 						placeholder2 = ExpressionBuilder.CreatePlaceholder(_sequence2,
@@ -519,7 +520,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					pathMapping.Add(path, (column1, column2));
 				}
 
-				if (_setOperation != SetOperation.Except && _setOperation != SetOperation.ExceptAll)
+				if (_setOperation is not SetOperation.Except and not SetOperation.ExceptAll)
 				{
 					foreach (var (placeholder, path) in placeholders2)
 					{
@@ -551,7 +552,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					if (eagerMapping?.ContainsKey(e1) == true)
 						continue;
 
-					var found = eager2.FirstOrDefault(e2 => ExpressionEqualityComparer.Instance.Equals(e2, e1));
+					var found = eager2.Find(e2 => ExpressionEqualityComparer.Instance.Equals(e2, e1));
 
 					eagerMapping ??= new(ExpressionEqualityComparer.Instance);
 
@@ -1008,7 +1009,7 @@ namespace LinqToDB.Internal.Linq.Builder
 					context.CloneContext(_sequence1), context.CloneContext(_sequence2),
 					context.CloneExpression(_methodCall))
 				{
-					LoadWithRoot = LoadWithRoot
+					LoadWithRoot = LoadWithRoot,
 				};
 
 				// for correct updating self-references below

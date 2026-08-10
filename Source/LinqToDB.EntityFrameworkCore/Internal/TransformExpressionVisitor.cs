@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 
 using LinqToDB.Extensions;
+using LinqToDB.Internal.Common;
 using LinqToDB.Internal.Expressions;
 using LinqToDB.Internal.Extensions;
 using LinqToDB.Internal.Reflection;
@@ -25,6 +26,8 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 	/// </summary>
 	public class TransformExpressionVisitor : ExpressionVisitorBase
 	{
+		internal static readonly ObjectPool<TransformExpressionVisitor> Pool = new(() => new TransformExpressionVisitor(), v => v.Cleanup(), 100);
+
 		static readonly char[]                  _nameSeparator = ['.'];
 
 		protected CanBeValuatedVisitor CanBeValuatedVisitor = new();
@@ -55,7 +58,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 		/// </summary>
 		/// <param name="method">Method to test.</param>
 		/// <param name="enumerable">Allow <see cref="IEnumerable{T}"/> extensions.</param>
-		/// <returns><c>true</c> if method is <see cref="IQueryable{T}"/> extension.</returns>
+		/// <returns><see langword="true"/> if method is <see cref="IQueryable{T}"/> extension.</returns>
 		public static bool IsQueryable(MethodCallExpression method, bool enumerable = true)
 		{
 			var type = method.Method.DeclaringType;
@@ -181,6 +184,30 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 										node.Arguments[0], Expression.NewArrayInit(typeof(Type)));
 						return newMethod;
 					}
+
+#if EF10
+					if (generic == ReflectionMethods.IgnoreQueryFiltersByKeyMethodInfo)
+					{
+						// EF: IgnoreQueryFilters(IReadOnlyCollection<string>) → linq2db: IgnoreFilters(IEnumerable<string>, params Type[]).
+						// EF treats a null/empty key collection as a no-op (filterKeys?.Count > 0 guard in EF's
+						// QueryableMethodNormalizingExpressionVisitor — every filter stays applied); linq2db's keyed
+						// overload does the same, but short-circuit here to drop the redundant call and stay null-safe.
+						// The keys arg is [NotParameterized], so it is a constant here and safe to evaluate.
+						var filterKeys = node.Arguments[1].EvaluateExpression<IReadOnlyCollection<string>>();
+						if (filterKeys is not { Count: > 0 })
+							return Visit(node.Arguments[0]);
+
+						var keysExpr = Expression.Call(
+							typeof(Enumerable), nameof(Enumerable.ToArray), [typeof(string)],
+							node.Arguments[1]);
+
+						// The keyed overload has a trailing params Type[]; Expression.Call doesn't expand it, so pass an empty array.
+						var newMethod = Expression.Call(
+							Methods.LinqToDB.IgnoreFiltersByKey.MakeGenericMethod(node.Method.GetGenericArguments()),
+							node.Arguments[0], keysExpr, Expression.NewArrayInit(typeof(Type)));
+						return newMethod;
+					}
+#endif
 
 					if (generic == ReflectionMethods.AsNoTrackingMethodInfo
 #if !EF31
@@ -341,7 +368,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 				Expression.Constant(dc));
 
 			var expressionTypeName = queryRoot.GetType().Name;
-			if (expressionTypeName == "TemporalAsOfQueryRootExpression")
+			if (string.Equals(expressionTypeName, "TemporalAsOfQueryRootExpression", StringComparison.Ordinal))
 			{
 				var pointInTime = GetPropValue<DateTime>(queryRoot, "PointInTime");
 
@@ -352,7 +379,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 				return asOf;
 			}
 
-			if (expressionTypeName == "TemporalFromToQueryRootExpression")
+			if (string.Equals(expressionTypeName, "TemporalFromToQueryRootExpression", StringComparison.Ordinal))
 			{
 				var from = GetPropValue<DateTime>(queryRoot, "From");
 				var to = GetPropValue<DateTime>(queryRoot, "To");
@@ -365,7 +392,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 				return fromTo;
 			}
 
-			if (expressionTypeName == "TemporalBetweenQueryRootExpression")
+			if (string.Equals(expressionTypeName, "TemporalBetweenQueryRootExpression", StringComparison.Ordinal))
 			{
 				var from = GetPropValue<DateTime>(queryRoot, "From");
 				var to = GetPropValue<DateTime>(queryRoot, "To");
@@ -378,7 +405,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 				return fromTo;
 			}
 
-			if (expressionTypeName == "TemporalContainedInQueryRootExpression")
+			if (string.Equals(expressionTypeName, "TemporalContainedInQueryRootExpression", StringComparison.Ordinal))
 			{
 				var from = GetPropValue<DateTime>(queryRoot, "From");
 				var to = GetPropValue<DateTime>(queryRoot, "To");
@@ -391,7 +418,7 @@ namespace LinqToDB.EntityFrameworkCore.Internal
 				return fromTo;
 			}
 
-			if (expressionTypeName == "TemporalAllQueryRootExpression")
+			if (string.Equals(expressionTypeName, "TemporalAllQueryRootExpression", StringComparison.Ordinal))
 			{
 				var all = Expression.Call(ReflectionMethods.TemporalAll.MakeGenericMethod(entityType),
 					GetAsOfSqlServer(getTableExpr, entityType));

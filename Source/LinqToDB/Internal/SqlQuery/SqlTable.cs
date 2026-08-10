@@ -11,7 +11,7 @@ using LinqToDB.SqlQuery;
 
 namespace LinqToDB.Internal.SqlQuery
 {
-	public class SqlTable : SqlExpressionBase, ISqlTableSource
+	public class SqlTable : SqlExpressionBase, ISqlNamedTable
 	{
 		#region Init
 
@@ -58,7 +58,7 @@ namespace LinqToDB.Internal.SqlQuery
 		public SqlTable(EntityDescriptor entityDescriptor, string? physicalName = null)
 			: this(entityDescriptor.ObjectType, (int?)null, new(string.Empty))
 		{
-			TableName    = physicalName != null && entityDescriptor.Name.Name != physicalName ? entityDescriptor.Name with { Name = physicalName } : entityDescriptor.Name;
+			TableName    = physicalName != null && !string.Equals(entityDescriptor.Name.Name, physicalName, StringComparison.Ordinal) ? entityDescriptor.Name with { Name = physicalName } : entityDescriptor.Name;
 			TableOptions = entityDescriptor.TableOptions;
 
 			if (!entityDescriptor.MappingSchema.IsScalarType(ObjectType))
@@ -75,6 +75,43 @@ namespace LinqToDB.Internal.SqlQuery
 						if (canBeNull is not null)
 							field.CanBeNull = canBeNull.Value;
 					}
+				}
+
+				foreach (var column in entityDescriptor.InheritanceSiblingColumns)
+				{
+					// Two sibling types may map their (distinct) members to the same physical column.
+					// Emit that column only once — otherwise DDL/SELECT would carry it twice. The
+					// duplicate member still resolves to this single field via the inheritance lookup
+					// in TableContext.GetField (matched by physical column name).
+					var alreadyPresent = false;
+					foreach (var existing in _orderedFields)
+					{
+						if (string.Equals(existing.PhysicalName, column.ColumnName, StringComparison.Ordinal))
+						{
+							alreadyPresent = true;
+							break;
+						}
+					}
+
+					if (alreadyPresent)
+						continue;
+
+					// ColumnName as Name avoids MemberName collision with the primary sibling field already in _fieldsLookup.
+					// If that key is itself already taken — a distinct member whose C# name equals this physical
+					// column name — fall back to a unique synthetic key: the emitted column is driven by PhysicalName
+					// and the sibling is resolved by member identity in TableContext.GetField, so the lookup key only
+					// has to be unique.
+					// CanBeNull is always true: other sibling types will have NULL in this column.
+					var fieldName = column.ColumnName;
+					while (_fieldsLookup.ContainsKey(fieldName))
+						fieldName = fieldName + ":" + column.MemberName;
+
+					var field = new SqlField(column) { Name = fieldName, CanBeNull = true };
+
+					Add(field);
+
+					if (field.Type.DataType == DataType.Undefined)
+						field.Type = SuggestType(field.Type, entityDescriptor.MappingSchema, out _);
 				}
 
 				var identityField = GetIdentityField();
@@ -203,7 +240,7 @@ namespace LinqToDB.Internal.SqlQuery
 
 			return ObjectType == otherTable.ObjectType &&
 			       TableName  == otherTable.TableName  &&
-			       Alias      == otherTable.Alias;
+string.Equals(Alias, otherTable.Alias, StringComparison.Ordinal);
 		}
 
 		public override bool CanBeNullable(NullabilityContext nullability) => CanBeNull;
@@ -254,7 +291,7 @@ namespace LinqToDB.Internal.SqlQuery
 
 		// list user to preserve order of fields in queries
 		internal readonly List<SqlField>              _orderedFields = new();
-		readonly          Dictionary<string,SqlField> _fieldsLookup  = new();
+		readonly          Dictionary<string,SqlField> _fieldsLookup  = new(StringComparer.Ordinal);
 
 		public           List<SqlField> Fields => _orderedFields;
 		public List<SqlQueryExtension>? SqlQueryExtensions { get; set; }
@@ -297,7 +334,7 @@ namespace LinqToDB.Internal.SqlQuery
 
 			ResetKeys();
 
-			if (field.Name == "*")
+			if (string.Equals(field.Name, "*", StringComparison.Ordinal))
 				_all = field;
 			else
 			{

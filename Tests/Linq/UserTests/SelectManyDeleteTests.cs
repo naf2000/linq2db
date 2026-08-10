@@ -39,21 +39,19 @@ namespace Tests.UserTests
 			public List<Child> Children { get; set; } = null!;
 		}
 
-		[YdbMemberNotFound]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		[ThrowsForProvider(typeof(LinqToDBException), TestProvName.AllClickHouse, ErrorMessage = ErrorHelper.ClickHouse.Error_CorrelatedDelete)]
 		[Test]
 		public void Test([DataSources] string context)
 		{
 			var harnessIds = new int[2];
 
-			using (var db = GetDataContext(context))
-			{
-				db.GetTable<Parent>()
-					.Where     (x => harnessIds.Contains(x.ParentID))
-					.SelectMany(x => x.Children)
-					.SelectMany(x => x.GrandChildren)
-					.Delete();
-			}
+			using var db = GetDataContext(context);
+			db.GetTable<Parent>()
+				.Where(x => harnessIds.Contains(x.ParentID))
+				.SelectMany(x => x.Children)
+				.SelectMany(x => x.GrandChildren)
+				.Delete();
 		}
 	}
 }

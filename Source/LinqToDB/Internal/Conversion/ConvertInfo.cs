@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Threading;
@@ -52,7 +53,7 @@ namespace LinqToDB.Internal.Conversion
 				}
 			}
 
-			public bool Equals(LambdaInfo? other)
+			public bool Equals([NotNullWhen(true)] LambdaInfo? other)
 			{
 				if (ReferenceEquals(null, other)) return false;
 				if (ReferenceEquals(this, other)) return true;
@@ -63,7 +64,7 @@ namespace LinqToDB.Internal.Conversion
 					LambdaID          == other.LambdaID;
 			}
 
-			public override bool Equals(object? obj)
+			public override bool Equals([NotNullWhen(true)] object? obj)
 			{
 				if (ReferenceEquals(null, obj)) return false;
 				if (ReferenceEquals(this, obj)) return true;
@@ -192,13 +193,13 @@ namespace LinqToDB.Internal.Conversion
 			{
 				foreach (var (id, types) in expressions
 					.Select (static e => (id : IdentifierBuilder.GetObjectID(e.Key), types : e.Value))
-					.OrderBy(static t => t.id))
+					.OrderBy(static t => t.id, StringComparer.Ordinal))
 				{
 					identifierBuilder.Add(id).Add(types.Count);
 
 					foreach (var (id2, value) in types
 						.Select (static e => (id2 : IdentifierBuilder.GetObjectID(e.Key), value : e.Value))
-						.OrderBy(static t => t.id2))
+						.OrderBy(static t => t.id2, StringComparer.Ordinal))
 					{
 						identifierBuilder.Add(id2).Add(IdentifierBuilder.GetObjectID(value));
 					}

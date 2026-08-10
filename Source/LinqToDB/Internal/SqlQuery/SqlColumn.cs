@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 
 using LinqToDB.Internal.SqlQuery.Visitors;
@@ -67,7 +68,7 @@ namespace LinqToDB.Internal.SqlQuery
 			{
 				var column      = (SqlColumn)current;
 				var columnQuery = column.Parent;
-				if (columnQuery == null || columnQuery.HasSetOperators || QueryHelper.EnumerateLevelSources(columnQuery).Take(2).Count() > 1)
+				if (columnQuery == null || columnQuery.HasSetOperators || QueryHelper.EnumerateLevelSources(columnQuery).Skip(1).Any())
 					break;
 				current = QueryHelper.UnwrapExpression(column.Expression, true);
 			}
@@ -75,35 +76,29 @@ namespace LinqToDB.Internal.SqlQuery
 			return current;
 		}
 
+		/// <summary>
+		/// The raw / un-finalized column alias - the explicitly set <see cref="RawAlias"/>, or one
+		/// derived from <see cref="Expression"/>. For non-render use (optimizers, expression builders,
+		/// diagnostics). In a SQL builder, read the finalized alias via
+		/// <c>AliasesContext.GetColumnAlias(this)</c> instead: finalized names live in the context, not
+		/// on the node (enforced by the <c>LINQ2DB0001</c> analyzer).
+		/// </summary>
 		public string? Alias
 		{
-			get
-			{
-				if (RawAlias == null)
-					return GetAlias(Expression);
-
-				return RawAlias;
-			}
+			get => RawAlias ?? GetAlias(Expression);
 			set => RawAlias = value;
 		}
 
 		static string? GetAlias(ISqlExpression? expr)
 		{
-			switch (expr)
+			return expr switch
 			{
-				case SqlField    field  : return field.Alias ?? field.PhysicalName;
-				case SqlColumn   column : return column.Alias;
-				case SelectQuery query  :
-					{
-						if (query.Select.Columns.Count == 1 && query.Select.Columns[0].Alias != "*")
-							return query.Select.Columns[0].Alias;
-						break;
-					}
-				case SqlExpression e
-					when e.Expr is "{0}": return GetAlias(e.Parameters[0]);
-			}
-
-			return null;
+				SqlField field => field.PhysicalName,
+				SqlColumn column => column.Alias,
+				SelectQuery { Select.Columns: [{ Alias: not "*" and var alias }] } => alias,
+				SqlExpression { Expr: "{0}", Parameters: [var parameter] } => GetAlias(parameter),
+				_ => null,
+			};
 		}
 
 		public override int GetElementHashCode()
@@ -144,7 +139,7 @@ namespace LinqToDB.Internal.SqlQuery
 			return writer.ToString();
 
 #else
-			if (Expression is SqlField or SqlColumn)
+			if (Expression is SqlField or SqlCteTableField or SqlColumn)
 				return this.ToDebugString();
 
 			return base.ToString()!;
@@ -166,7 +161,7 @@ namespace LinqToDB.Internal.SqlQuery
 			if (ReferenceEquals(this, other))
 				return true;
 
-			if (!(other is SqlColumn otherColumn))
+			if (other is not SqlColumn otherColumn)
 				return false;
 
 			if (Parent != otherColumn.Parent)
@@ -202,7 +197,7 @@ namespace LinqToDB.Internal.SqlQuery
 				.Append('[').Append(Number).Append(']')
 #endif
 				.Append('.')
-				.Append(Alias ?? FormattableString.Invariant($"c{(parentIndex >= 0 ? parentIndex + 1 : parentIndex)}"));
+				.Append(Alias ?? string.Create(CultureInfo.InvariantCulture, $"c{(parentIndex >= 0 ? parentIndex + 1 : parentIndex)}"));
 
 				if (!Expression.CanBeNullable(writer.Nullability) && CanBeNullable(writer.Nullability))
 					writer.Append('?');

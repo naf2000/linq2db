@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SqlTypes;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text;
 
@@ -128,7 +129,7 @@ namespace LinqToDB.Mapping
 		{
 			stringBuilder
 				.Append('\'')
-				.Append(value.Replace("'", "''"))
+				.Append(value.Replace("'", "''", StringComparison.Ordinal))
 				.Append('\'');
 		}
 
@@ -170,7 +171,7 @@ namespace LinqToDB.Mapping
 
 		public bool TryConvert(StringBuilder stringBuilder, MappingSchema mappingSchema, DbDataType? dataType, DataOptions options, object? value)
 		{
-			if (value.IsNullValue())
+			if (value.IsNullValue)
 			{
 				stringBuilder.Append("NULL");
 				return true;
@@ -186,7 +187,7 @@ namespace LinqToDB.Mapping
 
 		bool TryConvertImpl(StringBuilder? stringBuilder, DbDataType dataType, DataOptions options, object? value, bool tryBase)
 		{
-			if (value.IsNullValue())
+			if (value.IsNullValue)
 			{
 				stringBuilder?.Append("NULL");
 				return true;
@@ -321,13 +322,13 @@ namespace LinqToDB.Mapping
 							idBuilder.Add(kvp.Key).Add(kvp.Value);
 
 					_configurationID = idBuilder.CreateID();
-	}
+				}
 
 				return _configurationID.Value;
-}
+			}
 		}
 
-		public bool Equals(ValueToSqlConverter? other)
+		public bool Equals([NotNullWhen(true)] ValueToSqlConverter? other)
 		{
 			if (other is null)                return false;
 			if (ReferenceEquals(this, other)) return true;
@@ -335,7 +336,7 @@ namespace LinqToDB.Mapping
 			return ((IConfigurationID)this).ConfigurationID == ((IConfigurationID)other).ConfigurationID;
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			if (obj is null)                return false;
 			if (ReferenceEquals(this, obj)) return true;

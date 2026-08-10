@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 
 using LinqToDB.Internal.Linq.Builder;
@@ -44,7 +45,7 @@ namespace LinqToDB.Internal.Expressions
 
 		public ContextRefExpression WithAlias(string? alias)
 		{
-			if (Alias == alias)
+			if (string.Equals(Alias, alias, StringComparison.Ordinal))
 				return this;
 
 			return new ContextRefExpression(Type, BuildContext, alias);
@@ -59,7 +60,7 @@ namespace LinqToDB.Internal.Expressions
 
 		#region Equality members
 
-		public bool Equals(ContextRefExpression? other)
+		public bool Equals([NotNullWhen(true)] ContextRefExpression? other)
 		{
 			if (ReferenceEquals(null, other))
 			{
@@ -74,7 +75,7 @@ namespace LinqToDB.Internal.Expressions
 			return ElementType.Equals(other.ElementType) && BuildContext.Equals(other.BuildContext);
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			if (ReferenceEquals(null, obj))
 			{

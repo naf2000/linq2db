@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 
 using LinqToDB.DataProvider;
 using LinqToDB.Interceptors;
@@ -14,7 +15,7 @@ namespace LinqToDB.Data
 	/// Gets configuration string name to use with <see cref="DataConnection"/> instance.
 	/// </param>
 	/// <param name="ConnectionString">
-	/// The connection string, or <c>null</c> if a <see cref="DbConnection" /> was used instead of a connection string.
+	/// The connection string, or <see langword="null"/> if a <see cref="DbConnection" /> was used instead of a connection string.
 	/// </param>
 	/// <param name="DataProvider">
 	/// Gets optional <see cref="IDataProvider"/> implementation to use with connection.
@@ -33,8 +34,8 @@ namespace LinqToDB.Data
 	/// </param>
 	/// <param name="DisposeConnection">
 	/// Gets <see cref="DbConnection"/> ownership status for <see cref="DataConnection"/> instance.
-	/// If <c>true</c>, <see cref="DataConnection"/> will dispose provided/created connection on own dispose.
-	/// If <c>null</c>, <see cref="DataConnection"/> will dispose connection on own dispose only if it created by <see cref="DataConnection"/> instance.
+	/// If <see langword="true"/>, <see cref="DataConnection"/> will dispose provided/created connection on own dispose.
+	/// If <see langword="null"/>, <see cref="DataConnection"/> will dispose connection on own dispose only if it created by <see cref="DataConnection"/> instance.
 	/// </param>
 	/// <param name="ConnectionFactory">
 	/// Gets connection factory to use with <see cref="DataConnection"/> instance. Accepts current context <see cref="DataOptions" /> settings.
@@ -193,7 +194,7 @@ namespace LinqToDB.Data
 
 		#region IEquatable implementation
 
-		public bool Equals(ConnectionOptions? other)
+		public bool Equals([NotNullWhen(true)] ConnectionOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

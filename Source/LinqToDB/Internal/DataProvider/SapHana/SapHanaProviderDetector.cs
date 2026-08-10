@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Data.Common;
-using System.IO;
 
 using LinqToDB.Data;
 using LinqToDB.DataProvider;
@@ -34,7 +33,7 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 				case ProviderName.SapHanaOdbc                       : return _hanaOdbcDataProvider.Value;
 				case ""                                             :
 				case null                                           :
-					if (options.ConfigurationString?.Contains("Hana") == true)
+					if (options.ConfigurationString?.Contains("Hana", StringComparison.Ordinal) == true)
 						goto case ProviderName.SapHana;
 					break;
 				case ProviderName.SapHana                           :
@@ -87,12 +86,9 @@ namespace LinqToDB.Internal.DataProvider.SapHana
 			if (options.ConfigurationString?.IndexOf("ODBC", StringComparison.OrdinalIgnoreCase) >= 0)
 				return SapHanaProvider.ODBC;
 
-			var fileName = typeof(SapHanaProviderDetector).Assembly.GetFileName();
-			var dirName  = Path.GetDirectoryName(fileName);
-
 			foreach (var assemblyName in SapHanaProviderAdapter.UnmanagedAssemblyNames)
 			{
-				if (File.Exists(Path.Combine(dirName ?? ".", $"{assemblyName}.dll")))
+				if (Common.Tools.IsProviderAssemblyPresent(assemblyName))
 					return SapHanaProvider.Unmanaged;
 			}
 

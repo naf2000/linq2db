@@ -79,9 +79,8 @@ namespace Tests.Linq
 		[Test]
 		public void GroupByWithCast([DataSources(TestProvName.AllMySql)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				var query = db.Person
+			using var db = GetDataContext(context);
+			var query = db.Person
 					.GroupBy(_ => new
 					{
 						group = _.ID,
@@ -105,24 +104,22 @@ namespace Tests.Linq
 					.OrderByDescending(_ => _.x.value)
 					.Take(1000);
 
-				var result = query.ToList();
+			var result = query.ToList();
 
-				Assert.That(result, Has.Count.EqualTo(1));
-				using (Assert.EnterMultipleScope())
-				{
-					Assert.That(result[0].y, Is.EqualTo(1));
-					Assert.That(result[0].x.value, Is.Null);
-					Assert.That(result[0].x.id, Is.Null);
-				}
+			Assert.That(result, Has.Count.EqualTo(1));
+			using (Assert.EnterMultipleScope())
+			{
+				Assert.That(result[0].y, Is.EqualTo(1));
+				Assert.That(result[0].x.value, Is.Null);
+				Assert.That(result[0].x.id, Is.Null);
 			}
 		}
 
 		[Test]
 		public void GroupByWithTwoCasts([DataSources(TestProvName.AllMySql)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				var query = db.Person
+			using var db = GetDataContext(context);
+			var query = db.Person
 					.GroupBy(_ => new
 					{
 						group = _.ID,
@@ -147,24 +144,22 @@ namespace Tests.Linq
 					.OrderByDescending(_ => _.x.value)
 					.Take(1000);
 
-				var result = query.ToList();
+			var result = query.ToList();
 
-				Assert.That(result, Has.Count.EqualTo(1));
-				using (Assert.EnterMultipleScope())
-				{
-					Assert.That(result[0].y, Is.EqualTo(1));
-					Assert.That(result[0].x.value, Is.Null);
-					Assert.That(result[0].x.id, Is.Null);
-				}
+			Assert.That(result, Has.Count.EqualTo(1));
+			using (Assert.EnterMultipleScope())
+			{
+				Assert.That(result[0].y, Is.EqualTo(1));
+				Assert.That(result[0].x.value, Is.Null);
+				Assert.That(result[0].x.id, Is.Null);
 			}
 		}
 
 		[Test]
 		public void GroupByWithToNullable([DataSources(TestProvName.AllMySql)] string context)
 		{
-			using (var db = GetDataContext(context))
-			{
-				var query = db.Person
+			using var db = GetDataContext(context);
+			var query = db.Person
 					.GroupBy(_ => new
 					{
 						group = _.ID,
@@ -187,16 +182,43 @@ namespace Tests.Linq
 					.OrderByDescending(_ => _.x.value)
 					.Take(1000);
 
-				var result = query.ToList();
+			var result = query.ToList();
 
-				Assert.That(result, Has.Count.EqualTo(1));
-				using (Assert.EnterMultipleScope())
-				{
-					Assert.That(result[0].y, Is.EqualTo(1));
-					Assert.That(result[0].x.value, Is.Null);
-					Assert.That(result[0].x.id, Is.Null);
-				}
+			Assert.That(result, Has.Count.EqualTo(1));
+			using (Assert.EnterMultipleScope())
+			{
+				Assert.That(result[0].y, Is.EqualTo(1));
+				Assert.That(result[0].x.value, Is.Null);
+				Assert.That(result[0].x.id, Is.Null);
 			}
+		}
+
+		[Table]
+		sealed class StringTestTable
+		{
+			[PrimaryKey] public int     ID   { get; set; }
+			[Column]     public string? Data { get; set; }
+		}
+
+		[Test(Description = "Complex client-side string expression in Insert projection should not throw NRE")]
+		public void ComplexStringProjectionTest([DataSources] string context)
+		{
+			using var db  = GetDataContext(context);
+			using var tmp = db.CreateLocalTable([new StringTestTable { ID = 1, Data = null }]);
+
+			string? data = null;
+
+			var affected = tmp.Insert(() => new StringTestTable
+			{
+				ID   = 2,
+				Data = string.IsNullOrWhiteSpace(data) ? data : data!.Length > 50 ? data.Substring(0, 50) : data
+			});
+
+			if (context.SupportsRowcount())
+				Assert.That(affected, Is.EqualTo(1));
+
+			var row = tmp.Single(t => t.ID == 2);
+			Assert.That(row.Data, Is.Null);
 		}
 	}
 }

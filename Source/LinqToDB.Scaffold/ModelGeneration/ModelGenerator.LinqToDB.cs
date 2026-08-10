@@ -6,6 +6,7 @@ using System.Text;
 
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.SqlProvider;
+using LinqToDB.Scaffold.Internal;
 using LinqToDB.SqlQuery;
 
 #pragma warning disable CA1861
@@ -26,32 +27,41 @@ namespace LinqToDB.Tools.ModelGeneration
 		public Func<ITable,MemberBase?> GenerateProviderSpecificTable { get; set; } = _ => null;
 		public Func<Parameter,bool>     GenerateProcedureDbType       { get; set; } = _ => false;
 
-		public bool   GenerateDataOptionsConstructors     { get; set; } = true;
-		public bool   GenerateObsoleteAttributeForAliases { get; set; }
-		public bool   GenerateFindExtensions              { get; set; } = true;
-		public bool   IsCompactColumns                    { get; set; } = true;
-		public bool   IsCompactColumnAliases              { get; set; } = true;
-		public bool   GenerateDataTypes                   { get; set; }
-		public bool?  GenerateLengthProperty              { get; set; }
-		public bool?  GeneratePrecisionProperty           { get; set; }
-		public bool?  GenerateScaleProperty               { get; set; }
-		public bool   GenerateDbTypes                     { get; set; }
-		public bool   GenerateSchemaAsType                { get; set; }
-		public bool   GenerateViews                       { get; set; } = true;
-		public bool   GenerateProcedureResultAsList       { get; set; }
-		public bool   GenerateProceduresOnTypedContext    { get; set; } = true;
-		public bool   PrefixTableMappingWithSchema        { get; set; } = true;
-		public bool   PrefixTableMappingForDefaultSchema  { get; set; }
-		public string SchemaNameSuffix                    { get; set; } = "Schema";
-		public string SchemaDataContextTypeName           { get; set; } = "DataContext";
-		public bool   GenerateNameOf                      { get; set; } = true;
-		public bool   GenerateTableRegion                 { get; set; } = true;
+		public bool   GenerateDataOptionsConstructors            { get; set; } = true;
+		public bool   GenerateObsoleteAttributeForAliases        { get; set; }
+		public bool   GenerateFindExtensions                     { get; set; } = true;
+		public bool   IsCompactColumns                           { get; set; } = true;
+		public bool   IsCompactColumnAliases                     { get; set; } = true;
+		public bool   GenerateDataTypes                          { get; set; }
+		/// <summary>
+		/// Enables generation of the SQL Server-specific <c>GetSqlDecimalAttribute</c> on <see cref="decimal"/> columns
+		/// whose precision or scale can exceed CLR <see cref="decimal"/> limits.
+		/// Reads through the attribute reduce scale to fit and can round least-significant digits; values above <see cref="decimal.MaxValue"/> still throw.
+		/// </summary>
+		public bool   GenerateSqlServerDecimalOverflowProtection { get; set; }
+		public bool?  GenerateLengthProperty                     { get; set; }
+		public bool?  GeneratePrecisionProperty                  { get; set; }
+		public bool?  GenerateScaleProperty                      { get; set; }
+		public bool   GenerateDbTypes                            { get; set; }
+		public bool   GenerateSchemaAsType                       { get; set; }
+		public bool   GenerateViews                              { get; set; } = true;
+		public bool   GenerateProcedureResultAsList              { get; set; }
+		public bool   GenerateProceduresOnTypedContext           { get; set; } = true;
+		public bool   PrefixTableMappingWithSchema               { get; set; } = true;
+		public bool   PrefixTableMappingForDefaultSchema         { get; set; }
+		public string SchemaNameSuffix                           { get; set; } = "Schema";
+		public string SchemaDataContextTypeName                  { get; set; } = "DataContext";
+		public bool   GenerateNameOf                             { get; set; } = true;
+		public bool   GenerateTableRegion                        { get; set; } = true;
 
-		public Dictionary<string,string> SchemaNameMapping = new();
+		public Dictionary<string,string> SchemaNameMapping = new(StringComparer.Ordinal);
 
 		public Func<string?,string,Func<IMethod>,IEnumerable<IMethod>> GetConstructors;
 
 		public Func<IColumn,string,string,bool,string> BuildColumnComparison = (c, padding1, padding2, last) => $"\tt.{c.MemberName}{padding1} == {c.MemberName}{(last ? "" : padding2)}{(last ? ");" : " &&")}";
+
+		private protected bool IsSqlServerBuilder()
+			=> DataProviderName?.StartsWith(ProviderName.SqlServer, StringComparison.Ordinal) == true;
 
 		IEnumerable<IMethod> GetConstructorsImpl(string? defaultConfiguration, string name, Func<IMethod> methodFactory)
 		{
@@ -132,11 +142,11 @@ namespace LinqToDB.Tools.ModelGeneration
 
 				foreach (var line in text!.Split('\n'))
 					comments.Add("/ " + line
-						.Replace("&",  "&amp;")
-						.Replace("<",  "&lt;")
-						.Replace(">",  "&gt;")
-						.Replace("\"", "&quot;")
-						.Replace("'",  "&apos;")
+						.Replace("&",  "&amp;", StringComparison.Ordinal)
+						.Replace("<",  "&lt;", StringComparison.Ordinal)
+						.Replace(">",  "&gt;", StringComparison.Ordinal)
+						.Replace("\"", "&quot;", StringComparison.Ordinal)
+						.Replace("'",  "&apos;", StringComparison.Ordinal)
 						.TrimEnd());
 
 				comments.Add($"/ </{tag}>");
@@ -169,7 +179,7 @@ namespace LinqToDB.Tools.ModelGeneration
 					foreach (var m in GetAllClassMembers(mm.Members, exceptMethods!))
 						yield return m;
 				// constructors don't have own type/flag
-				else if (!(member is IMethod mt && (mt.BuildType() == null || exceptMethods != null && exceptMethods.Contains(mt.Name))))
+				else if (!(member is IMethod mt && (mt.BuildType() == null || (exceptMethods != null && exceptMethods.Contains(mt.Name, StringComparer.Ordinal)))))
 					yield return member;
 			}
 		}
@@ -205,6 +215,7 @@ namespace LinqToDB.Tools.ModelGeneration
 
 			Model.Namespace.Name ??= "DataModel";
 
+#pragma warning disable MA0002 // IEqualityComparer<string> or IComparer<string> is missing
 			var schemas =
 			(
 				from t in Tables.Values
@@ -228,7 +239,7 @@ namespace LinqToDB.Tools.ModelGeneration
 					TableFunctions  = new TMemberGroup { Region = "Table Functions" },
 				}
 			)
-			.ToDictionary(t => t.Name);
+			.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
 			var procSchemas =
 			(
@@ -253,9 +264,10 @@ namespace LinqToDB.Tools.ModelGeneration
 					TableFunctions  = new TMemberGroup { Region = "Table Functions" },
 				}
 			)
-			.ToDictionary(s => s.Name);
+			.ToDictionary(s => s.Name, StringComparer.Ordinal);
+#pragma warning restore MA0002 // IEqualityComparer<string> or IComparer<string> is missing
 
-			foreach(var schema in procSchemas)
+			foreach (var schema in procSchemas)
 				schemas.Add(schema.Key, schema.Value);
 
 			var defProps           = new TMemberGroup { IsCompact = true };
@@ -278,7 +290,7 @@ namespace LinqToDB.Tools.ModelGeneration
 					{
 						EnforceNotNullable = EnableNullableReferenceTypes && DataContextObject?.IsInterface == false,
 						TypeBuilder        = () => schema.TypeName + "." + SchemaDataContextTypeName,
-						Name               = schema.PropertyName
+						Name               = schema.PropertyName,
 					});
 
 					var implements = GenerateModelInterface ? "DataContext" : GenerateModelOnly ? "_dataContext" : "this";
@@ -344,8 +356,8 @@ namespace LinqToDB.Tools.ModelGeneration
 					Members   =
 					{
 						new TMethod { TypeBuilder = () => "void", Name = "InitDataContext",   AccessModifier = AccessModifier.Partial },
-						new TMethod { TypeBuilder = () => "void", Name = "InitMappingSchema", AccessModifier = AccessModifier.Partial }
-					}
+						new TMethod { TypeBuilder = () => "void", Name = "InitMappingSchema", AccessModifier = AccessModifier.Partial },
+					},
 				});
 
 				DataContextObject?.Members.Add(ctorGroup);
@@ -365,7 +377,7 @@ namespace LinqToDB.Tools.ModelGeneration
 					TypeBuilder       = () => null,
 					Name              = schema.DataContext.Name,
 					ParameterBuilders = { () => "IDataContext dataContext" },
-					BodyBuilders      = { () => ["_dataContext = dataContext;"] }
+					BodyBuilders      = { () => ["_dataContext = dataContext;"] },
 				});
 
 				foreach (var t in schema.Tables)
@@ -378,7 +390,7 @@ namespace LinqToDB.Tools.ModelGeneration
 //			if (tableGroup != null)
 //				Model.m.Add(tableGroup);
 
-			foreach (var t in Tables.Values.OrderBy(tbl => tbl.IsProviderSpecific).ThenBy(tbl => tbl.TypeName))
+			foreach (var t in Tables.Values.OrderBy(tbl => tbl.IsProviderSpecific).ThenBy(tbl => tbl.TypeName, StringComparer.Ordinal))
 			{
 				//Action<ITypeBase> addType         = tableGroup == null ? Model.Types.Add : tableGroup.Members.Add;
 				var addType         = Model.Types.Add;
@@ -410,7 +422,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						GetBodyBuilders = { () => [ string.Format(CultureInfo.InvariantCulture, (schema == null && GenerateModelInterface ? "DataContext" : schema != null || GenerateModelOnly ? "_dataContext" : "this") + ".GetTable<{0}>()", t.TypeName) ] },
 						IsAuto          = false,
 						HasGetter       = true,
-						HasSetter       = false
+						HasSetter       = false,
 					};
 
 				if (dcProp == null) continue;
@@ -421,7 +433,7 @@ namespace LinqToDB.Tools.ModelGeneration
 
 				TProperty? aProp = null;
 
-				if (t.AliasPropertyName != null && t.AliasPropertyName != t.DataContextPropertyName)
+				if (t.AliasPropertyName != null && !string.Equals(t.AliasPropertyName, t.DataContextPropertyName, StringComparison.Ordinal))
 				{
 					aProp = new TProperty
 					{
@@ -430,7 +442,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						GetBodyBuilders = { () => [t.DataContextPropertyName!] },
 						IsAuto          = false,
 						HasGetter       = true,
-						HasSetter       = false
+						HasSetter       = false,
 					};
 
 					if (GenerateObsoleteAttributeForAliases)
@@ -470,9 +482,7 @@ namespace LinqToDB.Tools.ModelGeneration
 				var columnAliases  = new TMemberGroup { IsCompact = IsCompactColumnAliases, Region = "Alias members" };
 				var nPKs           = t.Columns.Values.Count(c => c.IsPrimaryKey);
 				var allNullable    = t.Columns.Values.All  (c => c.IsNullable || c.IsIdentity);
-				var nameMaxLen     = t.Columns.Values.Max  (c => (int?)(c.MemberName == c.ColumnName
-					? 0
-					: ToStringLiteral(c.ColumnName).Length)) ?? 0;
+				var nameMaxLen     = t.Columns.Values.Max  (c => (int?)(string.Equals(c.MemberName, c.ColumnName , StringComparison.Ordinal) ? 0 : ToStringLiteral(c.ColumnName).Length)) ?? 0;
 				var dbTypeMaxLen   = t.Columns.Values.Max  (c => c.ColumnType?.Length)                              ?? 0;
 				var dataTypeMaxLen = t.Columns.Values.Where(c => c.DataType != null).Max  (c => c.DataType?.Length) ?? 0;
 				var dataTypePrefix = "LinqToDB.";
@@ -484,7 +494,7 @@ namespace LinqToDB.Tools.ModelGeneration
 					var ca = new TAttribute { Name = "Column" };
 					var canBeReplaced = true;
 
-					if (c.MemberName != c.ColumnName)
+					if (!string.Equals(c.MemberName, c.ColumnName, StringComparison.Ordinal))
 					{
 						var columnNameInAttr = ToStringLiteral(c.ColumnName);
 
@@ -514,24 +524,24 @@ namespace LinqToDB.Tools.ModelGeneration
 						canBeReplaced = false;
 					}
 
-					if (GenerateDataTypes && !GenerateLengthProperty.HasValue || GenerateLengthProperty == true)
+					if ((GenerateDataTypes && !GenerateLengthProperty.HasValue) || GenerateLengthProperty == true)
 					{
 						if (c.Length != null)
 							ca.Parameters.Add("Length=" + (c.Length == int.MaxValue ? "int.MaxValue" : c.Length?.ToString(CultureInfo.InvariantCulture)));
 						canBeReplaced = false;
 					}
 
-					if (GenerateDataTypes && !GeneratePrecisionProperty.HasValue || GeneratePrecisionProperty == true)
+					if ((GenerateDataTypes && !GeneratePrecisionProperty.HasValue) || GeneratePrecisionProperty == true)
 					{
 						if (c.Precision != null)
-							ca.Parameters.Add(FormattableString.Invariant($"Precision={c.Precision}"));
+							ca.Parameters.Add(string.Create(CultureInfo.InvariantCulture, $"Precision={c.Precision}"));
 						canBeReplaced = false;
 					}
 
-					if (GenerateDataTypes && !GenerateScaleProperty.HasValue || GenerateScaleProperty == true)
+					if ((GenerateDataTypes && !GenerateScaleProperty.HasValue) || GenerateScaleProperty == true)
 					{
 						if (c.Scale != null)
-							ca.Parameters.Add(FormattableString.Invariant($"Scale={c.Scale}"));
+							ca.Parameters.Add(string.Create(CultureInfo.InvariantCulture, $"Scale={c.Scale}"));
 						canBeReplaced = false;
 					}
 
@@ -554,6 +564,19 @@ namespace LinqToDB.Tools.ModelGeneration
 					}
 
 					c.Attributes.Insert(0, ca);
+
+					if (GenerateSqlServerDecimalOverflowProtection && IsSqlServerBuilder() && ShouldUseGetSqlDecimal(c))
+					{
+						Model.Usings.Add("LinqToDB.DataProvider.SqlServer");
+						c.Attributes.Add(new TAttribute { Name = "GetSqlDecimal" });
+					}
+
+					static bool ShouldUseGetSqlDecimal(IColumn column)
+					{
+						return
+							column.BuildType() is "decimal" or "decimal?" &&
+							SqlServerDecimalOverflow.ExceedsClrLimits(column.Precision, column.Scale);
+					}
 
 					// PK.
 					//
@@ -607,7 +630,7 @@ namespace LinqToDB.Tools.ModelGeneration
 
 					// Alias.
 					//
-					if (c.AliasName != null && c.AliasName != c.MemberName)
+					if (c.AliasName != null && !string.Equals(c.AliasName, c.MemberName, StringComparison.Ordinal))
 					{
 						var caProp = new TProperty
 						{
@@ -617,7 +640,7 @@ namespace LinqToDB.Tools.ModelGeneration
 							SetBodyBuilders = { () => [$"{c.MemberName} = value;"] },
 							IsAuto          = false,
 							HasGetter       = true,
-							HasSetter       = true
+							HasSetter       = true,
 						};
 
 						caProp.Comment.AddRange(columnComments);
@@ -648,7 +671,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						var associations          = new TMemberGroup { Region = "Associations" };
 						var extensionAssociations = new TMemberGroup { Region = $"{t.Name} Associations" };
 
-						foreach (var key in keys.OrderBy(k => k.MemberName))
+						foreach (var key in keys.OrderBy(k => k.MemberName, StringComparer.Ordinal))
 						{
 							string? otherTableName = null;
 
@@ -719,7 +742,7 @@ namespace LinqToDB.Tools.ModelGeneration
 							{
 								TypeBuilder = () => $"IQueryable<{key.OtherTable!.TypePrefix}{key.OtherTable.TypeName}>",
 								Name        = GetAssociationExtensionPluralName(key),
-								IsStatic    = true
+								IsStatic    = true,
 							};
 
 							extension.ParameterBuilders.Add(() => $"this {t.TypePrefix}{t.TypeName} obj");
@@ -735,7 +758,8 @@ namespace LinqToDB.Tools.ModelGeneration
 							{
 								var sb = new StringBuilder()
 									.Append("return db.GetTable<")
-									.Append(key.OtherTable?.TypePrefix + key.OtherTable!.TypeName)
+									.Append(key.OtherTable?.TypePrefix)
+									.Append(key.OtherTable!.TypeName)
 									.Append(">().Where(c => ");
 
 								for (var i = 0; i < key.OtherColumns.Count; i++)
@@ -775,7 +799,8 @@ namespace LinqToDB.Tools.ModelGeneration
 								{
 									var sb = new StringBuilder()
 										.Append("return db.GetTable<")
-										.Append(t.TypePrefix + t.TypeName)
+										.Append(t.TypePrefix)
+										.Append(t.TypeName)
 										.Append(">().Where(c => ");
 
 									for (var i = 0; i < key.OtherColumns.Count; i++)
@@ -829,7 +854,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						ParameterBuilders =
 						[
 							() => $"this ITable<{t.TypeName}> table",
-							..PKs.Select<IColumn,Func<string>>(c => () => $"{c.BuildType()} {c.MemberName}")
+							..PKs.Select<IColumn,Func<string>>(c => () => $"{c.BuildType()} {c.MemberName}"),
 						],
 						BodyBuilders      =
 						{
@@ -845,7 +870,7 @@ namespace LinqToDB.Tools.ModelGeneration
 
 									if (c.Conditional != null)
 									{
-										if (ss[1].EndsWith(");"))
+										if (ss[1].EndsWith(");", StringComparison.Ordinal))
 										{
 											ss[1] = ss[1][..^2];
 											ss.Add("#endif");
@@ -858,9 +883,9 @@ namespace LinqToDB.Tools.ModelGeneration
 									}
 
 									return ss;
-								}))
+								}), StringComparer.Ordinal),
 						},
-						IsStatic = true
+						IsStatic = true,
 					});
 				}
 
@@ -912,9 +937,9 @@ namespace LinqToDB.Tools.ModelGeneration
 				foreach (var p in Procedures.Values
 					.Where(proc =>
 						proc.IsLoaded ||
-						proc is { IsFunction     : true, IsTableFunction: false    } ||
-						proc is { IsTableFunction: true, ResultException: not null })
-					.OrderBy(proc => proc.Name))
+						proc is { IsFunction     : true, IsTableFunction: false    }
+						     or { IsTableFunction: true, ResultException: not null })
+					.OrderBy(proc => proc.Name, StringComparer.Ordinal))
 				{
 					Action<IMemberGroup> addProcs = procs.Members.Add;
 					Action<IMemberGroup> addFuncs = funcs.Members.Add;
@@ -955,7 +980,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						if (param.IsResult && p.IsFunction)
 							returnsComments = CreateXmlCommentFromText(param.Description, "returns");
 						else
-							comments.AddRange(CreateXmlCommentFromText(param.Description, "param", $"name=\"{(param.ParameterName!.StartsWith("@") ? param.ParameterName?[1..] : param.ParameterName)}\""));
+							comments.AddRange(CreateXmlCommentFromText(param.Description, "param", $"name=\"{(param.ParameterName!.StartsWith('@') ? param.ParameterName?[1..] : param.ParameterName)}\""));
 					}
 
 					if (returnsComments != null)
@@ -999,8 +1024,8 @@ namespace LinqToDB.Tools.ModelGeneration
 							Parameters =
 							{
 								"Name=" + ToStringLiteral(functionName),
-								"ServerSideOnly=true, IsAggregate = true" + (paramCount > 0 ? ", ArgIndices = new[] { " + string.Join(", ", Enumerable.Range(0, p.ProcParameters.Count(pr => !pr.IsResult))) + " }" : null)
-							}
+								"ServerSideOnly=true, IsAggregate = true" + (paramCount > 0 ? ", ArgIndices = new[] { " + string.Join(", ", Enumerable.Range(0, p.ProcParameters.Count(pr => !pr.IsResult))) + " }" : null),
+							},
 						});
 
 						if (p.IsDefaultSchema || !GenerateSchemaAsType)
@@ -1046,7 +1071,7 @@ namespace LinqToDB.Tools.ModelGeneration
 						p.BodyBuilders.Add(() => new[]
 						{
 //							$"return {thisDataContext}.GetTable<{p.ResultTable!.TypeName}>(this, (MethodInfo)MethodBase.GetCurrentMethod(){(EnableNullableReferenceTypes ? "!" : "")}{(p.ProcParameters?.Count == 0 ? ");" : ",")}",
-							$"return {thisDataContext}.TableFromExpression(() => {p.Name}({string.Join(", ", p.ProcParameters.Select(par => par.ParameterName))}));"
+							$"return {thisDataContext}.TableFromExpression(() => {p.Name}({string.Join(", ", p.ProcParameters.Select(par => par.ParameterName))}));",
 						});
 
 //						for (var idx = 0; idx < p.ProcParameters.Count; idx++)
@@ -1077,16 +1102,16 @@ namespace LinqToDB.Tools.ModelGeneration
 						var retName = "ret";
 						var retNo   = 0;
 
-						while (p.ProcParameters.Any(pp => pp.ParameterName == retName))
-							retName = FormattableString.Invariant($"ret{++retNo}");
+						while (p.ProcParameters.Exists(pp => string.Equals(pp.ParameterName, retName, StringComparison.Ordinal)))
+							retName = string.Create(CultureInfo.InvariantCulture, $"ret{++retNo}");
 
-						var hasOut = outputParameters.Any(pr => pr.IsOut || pr.IsResult);
+						var hasOut = outputParameters.Exists(pr => pr.IsOut || pr.IsResult);
 						var prefix = hasOut ? "var " + retName + " = " : "return ";
 
 						var cnt = 0;
 						var parametersVarName = "parameters";
-						while (p.ProcParameters.Where(par => !par.IsResult || !p.IsFunction).Any(par => par.ParameterName == parametersVarName))
-							parametersVarName = FormattableString.Invariant($"parameters{cnt++}");
+						while (p.ProcParameters.Exists(par => (!par.IsResult || !p.IsFunction) && string.Equals(par.ParameterName, parametersVarName, StringComparison.Ordinal)))
+							parametersVarName = string.Create(CultureInfo.InvariantCulture, $"parameters{cnt++}");
 
 						var maxLenSchema = inputParameters.Max(pr => pr.SchemaName?.   Length)                          ?? 0;
 						var maxLenParam  = inputParameters.Max(pr => pr.ParameterName?.Length)                          ?? 0;
@@ -1099,7 +1124,7 @@ namespace LinqToDB.Tools.ModelGeneration
 								var code = new List<string>
 								{
 									$"var {parametersVarName} = new []",
-									"{"
+									"{",
 								};
 
 								for (var i = 0; i < inOrOutputParameters.Count; i++)
@@ -1188,7 +1213,7 @@ namespace LinqToDB.Tools.ModelGeneration
 									"",
 									prefix + "dataConnection.QueryProc(dataReader =>",
 									"\tnew " + p.ResultTable.TypeName,
-									"\t{"
+									"\t{",
 								]);
 
 								var n          = 0;
@@ -1206,7 +1231,7 @@ namespace LinqToDB.Tools.ModelGeneration
 											LenDiff(maxNameLen, c.MemberName!),
 											c.BuildType(),
 											LenDiff(maxTypeLen, c.BuildType()!),
-											n++)
+											n++),
 									]);
 								}
 
@@ -1238,7 +1263,7 @@ namespace LinqToDB.Tools.ModelGeneration
 										pr.Type.ToTypeName(),
 										LenDiff(maxLenType, pr.Type.ToTypeName()),
 										parametersVarName,
-										inOrOutputParameters.IndexOf(pr))
+										inOrOutputParameters.IndexOf(pr)),
 								]);
 							}
 
@@ -1252,7 +1277,7 @@ namespace LinqToDB.Tools.ModelGeneration
 
 						foreach (var c in p.ResultTable.Columns.Values)
 						{
-							if (c.MemberName != c.ColumnName)
+							if (!string.Equals(c.MemberName, c.ColumnName, StringComparison.Ordinal))
 								c.Attributes.Add(new TAttribute { Name = "Column", Parameters = { ToStringLiteral(c.ColumnName) } });
 							columns.Members.Add(c);
 						}

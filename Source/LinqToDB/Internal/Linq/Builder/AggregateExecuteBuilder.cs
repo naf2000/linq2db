@@ -11,10 +11,8 @@ namespace LinqToDB.Internal.Linq.Builder
 	[BuildsMethodCall(nameof(LinqExtensions.AggregateExecute))]
 	sealed class AggregateExecuteBuilder : MethodCallBuilder
 	{
-#pragma warning disable IDE0060
 		public static bool CanBuildMethod(MethodCallExpression call, BuildInfo info, ExpressionBuilder _)
-			=> call.IsQueryable();
-#pragma warning restore IDE0060
+			=> call.IsQueryable;
 
 		protected override BuildSequenceResult BuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 		{
@@ -41,6 +39,10 @@ namespace LinqToDB.Internal.Linq.Builder
 					sequence = null;
 				}
 			}
+
+			// Aggregate's source is an independent sub-sequence — isolate its OrderBy so it
+			// doesn't leak into outer state consumed by CteUnion's parent RN OVER (ORDER BY ...).
+			using var orderByIsolation = builder.IsolateOrderBy();
 
 			if (sequence == null)
 			{
@@ -80,19 +82,21 @@ namespace LinqToDB.Internal.Linq.Builder
 				return builder.TryBuildSequence(new BuildInfo(buildInfo, marker.InnerExpression));
 			}
 
-			SqlPlaceholderExpression?     translatedPlaceholder = null;
-			Func<Expression, Expression>? validatorFunc         = null;
+			SqlPlaceholderExpression?                                 translatedPlaceholder = null;
+			Func<Expression, Expression>?                             materializationCheck  = null;
+			Func<SqlPlaceholderExpression, SqlPlaceholderExpression>? sqlRewriter           = null;
 
 			if (translated is SqlPlaceholderExpression placeholder)
 			{
 				translatedPlaceholder = placeholder;
 			}
-			else if (translated is SqlValidateExpression sqlValidateExpression)
+			else if (translated is SqlAggregateLifterExpression sqlAggregateLifter)
 			{
-				translatedPlaceholder = sqlValidateExpression.InnerExpression as SqlPlaceholderExpression;
-				validatorFunc         = sqlValidateExpression.Validator;
+				translatedPlaceholder = sqlAggregateLifter.InnerExpression as SqlPlaceholderExpression;
+				materializationCheck  = sqlAggregateLifter.MaterializationCheck;
+				sqlRewriter           = sqlAggregateLifter.SqlRewriter;
 			}
-			
+
 			if (translatedPlaceholder == null)
 			{
 				if (translated is SqlErrorExpression)
@@ -103,8 +107,9 @@ namespace LinqToDB.Internal.Linq.Builder
 			var context = new AggregateExecuteContext(sequenceExpression, sequence, lambda.Body.Type)
 			{
 				Placeholder          = translatedPlaceholder,
-				Validator            = validatorFunc,
-				OuterJoinParentQuery = isSimple ? null : buildInfo.Parent?.SelectQuery
+				MaterializationCheck = materializationCheck,
+				SqlRewriter          = sqlRewriter,
+				OuterJoinParentQuery = isSimple ? null : buildInfo.Parent?.SelectQuery,
 			};
 
 			return BuildSequenceResult.FromContext(context);
@@ -224,6 +229,19 @@ namespace LinqToDB.Internal.Linq.Builder
 					tableSource.Joins.Add(join.JoinedTable);
 
 					Placeholder = Builder.UpdateNesting(parentQuery, Placeholder);
+
+					// Apply the SQL-side rewriter AFTER UpdateNesting has promoted the inner aggregate
+					// to a parent-side column reference. This is the hook for non-nullable Sum and
+					// StringJoin family aggregates → COALESCE(<lifted-col>, default), keeping the bare
+					// aggregate in the inner SQL tree (intact for ClickHouse-style provider validation
+					// and for DefaultIfEmpty's downstream CASE injection) and only adding COALESCE on
+					// the lifted reference. The C# MaterializationCheck (Min/Max/Avg CheckNullValue)
+					// is preserved — it runs during materialization.
+					if (SqlRewriter != null)
+					{
+						Placeholder = SqlRewriter(Placeholder);
+						SqlRewriter = null;
+					}
 				}
 			}
 
@@ -236,9 +254,9 @@ namespace LinqToDB.Internal.Linq.Builder
 
 				Expression result;
 
-				if (flags.IsExpression() && Validator != null)
+				if (flags.IsExpression() && MaterializationCheck != null)
 				{
-					result = Validator(Placeholder);
+					result = MaterializationCheck(Placeholder);
 				}
 				else
 				{
@@ -258,9 +276,11 @@ namespace LinqToDB.Internal.Linq.Builder
 			{
 				return new AggregateExecuteContext(context.CloneExpression(SequenceExpression), context.CloneContext(Context), ElementType)
 				{
-					Placeholder = context.CloneExpression(Placeholder),
+					Placeholder          = context.CloneExpression(Placeholder),
 					OuterJoinParentQuery = context.CloneElement(OuterJoinParentQuery),
-					_joinedTable = context.CloneElement(_joinedTable),
+					_joinedTable         = context.CloneElement(_joinedTable),
+					MaterializationCheck = MaterializationCheck,
+					SqlRewriter          = SqlRewriter,
 				};
 			}
 
@@ -269,8 +289,10 @@ namespace LinqToDB.Internal.Linq.Builder
 				return null;
 			}
 
-			public override bool                                        IsSingleElement => true;
-			public          Func<SqlPlaceholderExpression, Expression>? Validator       { get; set; }
+			public override bool IsSingleElement => true;
+
+			public Func<Expression, Expression>?                             MaterializationCheck { get; set; }
+			public Func<SqlPlaceholderExpression, SqlPlaceholderExpression>? SqlRewriter          { get; set; }
 		}
 
 	}

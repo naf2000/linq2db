@@ -91,7 +91,7 @@ namespace LinqToDB.Internal.Linq
 				}
 				// SqlNullValueException: MySqlData
 				// OracleNullValueException: managed and native oracle providers
-				catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException"))
+				catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException", StringComparison.Ordinal))
 				{
 					// TODO: debug cases when our tests go into slow-mode (e.g. sqlite.ms)
 					if (mapperInfo.IsFaulted)
@@ -123,7 +123,7 @@ namespace LinqToDB.Internal.Linq
 				{
 					MapperExpression = expr,
 					Mapper           = expression.CompileExpression(),
-					IsFaulted        = true
+					IsFaulted        = true,
 				};
 
 				_mappers[dataReaderType] = mapperInfo;
@@ -217,7 +217,7 @@ namespace LinqToDB.Internal.Linq
 
 				protected override Expression VisitParameter(ParameterExpression node)
 				{
-					if (_oldVariable == null && node.Name == "ldr")
+					if (_oldVariable == null && string.Equals(node.Name, "ldr", StringComparison.Ordinal))
 					{
 						_oldVariable = node;
 						_newVariable = Expression.Variable(_dataReader.GetType(), "ldr");
@@ -256,7 +256,7 @@ namespace LinqToDB.Internal.Linq
 				using var transformer = _mapperExpressionTransformerPool.Allocate();
 				var expression = transformer.Value.Transform(context, dataReader, dataReaderType, slowMode, _expression);
 
-				if (LinqToDB.Common.Configuration.OptimizeForSequentialAccess)
+				if (context.Options.LinqOptions.OptimizeForSequentialAccess)
 					expression = SequentialAccessHelper.OptimizeMappingExpressionForSequentialAccess(expression, dataReader.FieldCount, reduce: false);
 
 				return (Expression<Func<IQueryRunner, DbDataReader, T>>)expression;
@@ -526,7 +526,7 @@ namespace LinqToDB.Internal.Linq
 							res = mapperInfo.Mapper(runner, origDataReader);
 							runner.RowsCount++;
 						}
-						catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException"))
+						catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException", StringComparison.Ordinal))
 						{
 							// TODO: debug cases when our tests go into slow-mode (e.g. sqlite.ms)
 							if (mapperInfo.IsFaulted)
@@ -555,10 +555,11 @@ namespace LinqToDB.Internal.Linq
 			{
 				await using (ActivityService.StartAndConfigureAwait(ActivityID.ExecuteQueryAsync))
 				{
-#pragma warning disable CA2007
-					await using var runner = _dataContext.GetQueryRunner(_query, _dataContext, _queryNumber, _expressions, _parameters, _preambles);
-					await using var dr     = await runner.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-#pragma warning restore CA2007
+					var runner = _dataContext.GetQueryRunner(_query, _dataContext, _queryNumber, _expressions, _parameters, _preambles);
+					await using var _2 = runner.ConfigureAwait(false);
+
+					var dr = await runner.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+					await using var _3 = dr.ConfigureAwait(false);
 
 					var dataReader = dr.DataReader!;
 
@@ -591,7 +592,7 @@ namespace LinqToDB.Internal.Linq
 								res = mapperInfo.Mapper(runner, origDataReader);
 								runner.RowsCount++;
 							}
-							catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException"))
+							catch (Exception ex) when (ex is FormatException or InvalidCastException or LinqToDBConvertException || ex.GetType().Name.Contains("NullValueException", StringComparison.Ordinal))
 							{
 								// TODO: debug cases when our tests go into slow-mode (e.g. sqlite.ms)
 								if (mapperInfo.IsFaulted)
@@ -762,7 +763,9 @@ namespace LinqToDB.Internal.Linq
 				return ret;
 			}
 
+#pragma warning disable MA0098 // Use indexer instead of LINQ methods
 			return Array.Empty<T>().First();
+#pragma warning restore MA0098 // Use indexer instead of LINQ methods
 		}
 
 		static async Task<T> ExecuteElementAsync<T>(
@@ -777,36 +780,36 @@ namespace LinqToDB.Internal.Linq
 			await using (ActivityService.StartAndConfigureAwait(ActivityID.ExecuteElementAsync))
 			{
 				var runner = dataContext.GetQueryRunner(query, dataContext, 0, expressions, ps, preambles);
-				await using (runner.ConfigureAwait(false))
+				await using var _1 = runner.ConfigureAwait(false);
+
+				var dr = await runner.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+				await using var _2 = dr.ConfigureAwait(false);
+
+				if (await dr.ReadAsync(cancellationToken).ConfigureAwait(false))
 				{
-					var dr = await runner.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-					await using (dr.ConfigureAwait(false))
+					DbDataReader dataReader;
+
+					if (dataContext is IInterceptable<IUnwrapDataObjectInterceptor> { Interceptor: { } interceptor })
 					{
-						if (await dr.ReadAsync(cancellationToken).ConfigureAwait(false))
-						{
-							DbDataReader dataReader;
-
-							if (dataContext is IInterceptable<IUnwrapDataObjectInterceptor> { Interceptor: { } interceptor })
-							{
-								using (ActivityService.Start(ActivityID.UnwrapDataObjectInterceptorUnwrapDataReader))
-									dataReader = interceptor.UnwrapDataReader(dataContext, dr.DataReader);
-							}
-							else
-							{
-								dataReader = dr.DataReader;
-							}
-
-							var mapperInfo = mapper.GetMapperInfo(dataContext, runner, dataReader);
-							var item       = mapper.Map(dataContext, runner, dataReader, ref mapperInfo);
-
-							var ret = dataContext.MappingSchema.ChangeTypeTo<T>(item);
-							runner.RowsCount++;
-							return ret;
-						}
-
-						return Array.Empty<T>().First();
+						using (ActivityService.Start(ActivityID.UnwrapDataObjectInterceptorUnwrapDataReader))
+							dataReader = interceptor.UnwrapDataReader(dataContext, dr.DataReader);
 					}
+					else
+					{
+						dataReader = dr.DataReader;
+					}
+
+					var mapperInfo = mapper.GetMapperInfo(dataContext, runner, dataReader);
+					var item       = mapper.Map(dataContext, runner, dataReader, ref mapperInfo);
+
+					var ret = dataContext.MappingSchema.ChangeTypeTo<T>(item);
+					runner.RowsCount++;
+					return ret;
 				}
+
+#pragma warning disable MA0098 // Use indexer instead of LINQ methods
+				return Array.Empty<T>().First();
+#pragma warning restore MA0098 // Use indexer instead of LINQ methods
 			}
 		}
 
@@ -989,6 +992,73 @@ namespace LinqToDB.Internal.Linq
 
 					runner.QueryNumber = 1;
 
+					return await runner.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+				}
+			}
+		}
+
+		#endregion
+
+		#region IfExistsUpdateElseInsert (Upsert .When on providers lacking native MERGE / ON CONFLICT)
+
+		/// <summary>
+		/// Three-query orchestration used when an <c>Upsert(...)</c> with <c>.Update(v =&gt; v.When(cond))</c>
+		/// has to run against a provider that supports neither MERGE nor ON CONFLICT and therefore
+		/// falls back to <see cref="MakeAlternativeInsertOrUpdate"/>.
+		/// <list type="bullet">
+		///   <item>Query 0: scalar SELECT 1 over the match-key WHERE. Returns non-null iff the row exists.</item>
+		///   <item>Query 1: UPDATE guarded by <c>keys AND when</c>. Runs only if Q0 returned a row.
+		///     May affect zero rows when the predicate rejects — that is the correct outcome.</item>
+		///   <item>Query 2: INSERT. Runs only if Q0 returned no row.</item>
+		/// </list>
+		/// This avoids the classic UPDATE-then-<c>@@ROWCOUNT==0</c> pitfall where a predicate-rejected
+		/// UPDATE falsely triggers INSERT and violates the unique-key.
+		/// <para>
+		/// <b>Atomicity:</b> the three statements run as independent commands. Under concurrent writers
+		/// the caller may observe either a duplicate-key error (Q0 saw no row, another session inserted
+		/// between Q0 and Q2) or a silent zero-affected UPDATE (Q0 saw a row, another session deleted
+		/// it between Q0 and Q1). Callers that need atomicity must wrap the <c>Upsert</c> call in their
+		/// own transaction. This matches the behavior of the existing two-query
+		/// <see cref="MakeAlternativeInsertOrUpdate"/> fallback used by <c>InsertOrReplace</c>.
+		/// </para>
+		/// </summary>
+		public static void SetIfExistsUpdateElseInsert(Query query)
+		{
+			FinalizeQuery(query);
+
+			if (query.Queries.Count != 3)
+				throw new InvalidOperationException();
+
+			query.GetElement      = (db, expr, ps, preambles)        => IfExistsUpdateElseInsert(query, db, expr, ps, preambles);
+			query.GetElementAsync = (db, expr, ps, preambles, token) => IfExistsUpdateElseInsertAsync(query, db, expr, ps, preambles, token);
+		}
+
+		static object? IfExistsUpdateElseInsert(Query query, IDataContext dataContext, IQueryExpressions expressions, object?[]? parameters, object?[]? preambles)
+		{
+			using var m      = ActivityService.Start(ActivityID.ExecuteScalarAlternative);
+			using var runner = dataContext.GetQueryRunner(query, dataContext, 0, expressions, parameters, preambles);
+			var exists       = runner.ExecuteScalar();
+
+			runner.QueryNumber = exists != null ? 1 : 2;
+			return runner.ExecuteNonQuery();
+		}
+
+		static async Task<object?> IfExistsUpdateElseInsertAsync(
+			Query             query,
+			IDataContext      dataContext,
+			IQueryExpressions expressions,
+			object?[]?        parameters,
+			object?[]?        preambles,
+			CancellationToken cancellationToken)
+		{
+			await using (ActivityService.StartAndConfigureAwait(ActivityID.ExecuteScalarAlternativeAsync))
+			{
+				var runner = dataContext.GetQueryRunner(query, dataContext, 0, expressions, parameters, preambles);
+				await using (runner.ConfigureAwait(false))
+				{
+					var exists = await runner.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+
+					runner.QueryNumber = exists != null ? 1 : 2;
 					return await runner.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 				}
 			}

@@ -14,7 +14,7 @@ namespace LinqToDB.Internal.DataProvider.Access
 		{
 		}
 
-		static string[] AccessLikeCharactersToEscape = {"_", "?", "*", "%", "#", "-", "!"};
+		static readonly string[] AccessLikeCharactersToEscape = {"_", "?", "*", "%", "#", "-", "!"};
 
 		public override bool LikeIsEscapeSupported => false;
 
@@ -35,11 +35,11 @@ namespace LinqToDB.Internal.DataProvider.Access
 		protected override string EscapeLikePattern(string str)
 		{
 			var newStr = DataTools.EscapeUnterminatedBracket(str);
-			if (newStr == str)
-				newStr = newStr.Replace("[", "[[]");
+			if (string.Equals(newStr, str, StringComparison.Ordinal))
+				newStr = newStr.Replace("[", "[[]", StringComparison.Ordinal);
 
 			foreach (var s in LikeCharactersToEscape)
-				newStr = newStr.Replace(s, "[" + s + "]");
+				newStr = newStr.Replace(s, "[" + s + "]", StringComparison.Ordinal);
 
 			return newStr;
 		}
@@ -134,6 +134,15 @@ namespace LinqToDB.Internal.DataProvider.Access
 			if (element.SystemType == null)
 				return element;
 
+			// Strip NULL-literal operands before folding to IIF, matching base ConvertCoalesce —
+			// otherwise a no-op guard like Coalesce(x, NULL) folds to IIF(x IS NULL, NULL, x)
+			// (issue #5531).
+			var reduced = RemoveNullValues(element);
+			if (reduced is not SqlCoalesceExpression coalesce)
+				return reduced;
+
+			element = coalesce;
+
 			if (element.Expressions.Length == 2)
 			{
 				return new SqlConditionExpression(new SqlPredicate.IsNull(element.Expressions[0], false), element.Expressions[1], element.Expressions[0]);
@@ -149,39 +158,33 @@ namespace LinqToDB.Internal.DataProvider.Access
 				var parms = new ISqlExpression[array.Length - 1];
 				Array.Copy(array, 1, parms, 0, parms.Length);
 				return parms;
-			};
+			}
 
 			return element;
 		}
 
 		public override ISqlExpression ConvertSqlFunction(SqlFunction func)
 		{
-			switch (func)
-			{ 
-				case { Name: PseudoFunctions.TO_LOWER }:
-					return func.WithName("LCase");
-				case { Name: PseudoFunctions.TO_UPPER }:
-					return func.WithName("UCase");
-				case { Name: PseudoFunctions.LENGTH }:
-					return func.WithName("Len");
+			return func switch
+			{
+				{ Name: PseudoFunctions.TO_LOWER } => func.WithName("LCase"),
+				{ Name: PseudoFunctions.TO_UPPER } => func.WithName("UCase"),
+				{ Name: PseudoFunctions.LENGTH } => func.WithName("Len"),
 
-				case {
+				{
 					Name: "CharIndex",
 					Parameters: [var p0, var p1],
 					Type: var type,
-				}:
-					return new SqlFunction(type, "InStr", new SqlValue(1), p1, p0, new SqlValue(1));
+				} => new SqlFunction(type, "InStr", new SqlValue(1), p1, p0, new SqlValue(1)),
 
-				case {
+				{
 					Name: "CharIndex",
 					Parameters: [var p0, var p1, var p2],
 					Type: var type,
-				}:
-					return new SqlFunction(type, "InStr", p2, p1, p0, new SqlValue(1));
+				} => new SqlFunction(type, "InStr", p2, p1, p0, new SqlValue(1)),
 
-				default:
-					return base.ConvertSqlFunction(func);
-			}
+				_ => base.ConvertSqlFunction(func),
+			};
 		}
 
 		public override ISqlExpression ConvertSqlUnaryExpression(SqlUnaryExpression element)
@@ -229,17 +232,13 @@ namespace LinqToDB.Internal.DataProvider.Access
 
 		public override IQueryElement ConvertSqlBinaryExpression(SqlBinaryExpression element)
 		{
-			switch (element)
+			return element switch
 			{
-				case SqlBinaryExpression(var type, var ex1, "%", var ex2):
-					return new SqlBinaryExpression(type, ex1, "MOD", ex2, Precedence.Additive - 1);
-				case SqlBinaryExpression(var type, var ex1, "&", var ex2):
-					return new SqlBinaryExpression(type, ex1, "BAND", ex2, Precedence.Bitwise);
-				case SqlBinaryExpression(var type, var ex1, "|", var ex2):
-					return new SqlBinaryExpression(type, ex1, "BOR", ex2, Precedence.Bitwise - 1);
-			}
-
-			return base.ConvertSqlBinaryExpression(element);
+				SqlBinaryExpression(var type, var ex1, "%", var ex2) => new SqlBinaryExpression(type, ex1, "MOD", ex2, Precedence.Additive - 1),
+				SqlBinaryExpression(var type, var ex1, "&", var ex2) => new SqlBinaryExpression(type, ex1, "BAND", ex2, Precedence.Bitwise),
+				SqlBinaryExpression(var type, var ex1, "|", var ex2) => new SqlBinaryExpression(type, ex1, "BOR", ex2, Precedence.Bitwise - 1),
+				_ => base.ConvertSqlBinaryExpression(element),
+			};
 		}
 	}
 }

@@ -13,6 +13,7 @@ using LinqToDB.Data;
 using LinqToDB.DataProvider.PostgreSQL;
 using LinqToDB.Internal.DataProvider.PostgreSQL.Translation;
 using LinqToDB.Internal.SqlProvider;
+using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Linq.Translation;
 using LinqToDB.Mapping;
 using LinqToDB.SchemaProvider;
@@ -23,9 +24,12 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 	sealed class PostgreSQLDataProvider92 : PostgreSQLDataProvider { public PostgreSQLDataProvider92() : base(ProviderName.PostgreSQL92, PostgreSQLVersion.v92) {} }
 	sealed class PostgreSQLDataProvider93 : PostgreSQLDataProvider { public PostgreSQLDataProvider93() : base(ProviderName.PostgreSQL93, PostgreSQLVersion.v93) {} }
 	sealed class PostgreSQLDataProvider95 : PostgreSQLDataProvider { public PostgreSQLDataProvider95() : base(ProviderName.PostgreSQL95, PostgreSQLVersion.v95) {} }
+	sealed class PostgreSQLDataProvider11 : PostgreSQLDataProvider { public PostgreSQLDataProvider11() : base(ProviderName.PostgreSQL11, PostgreSQLVersion.v11) {} }
+	sealed class PostgreSQLDataProvider12 : PostgreSQLDataProvider { public PostgreSQLDataProvider12() : base(ProviderName.PostgreSQL12, PostgreSQLVersion.v12) {} }
 	sealed class PostgreSQLDataProvider13 : PostgreSQLDataProvider { public PostgreSQLDataProvider13() : base(ProviderName.PostgreSQL13, PostgreSQLVersion.v13) {} }
 	sealed class PostgreSQLDataProvider15 : PostgreSQLDataProvider { public PostgreSQLDataProvider15() : base(ProviderName.PostgreSQL15, PostgreSQLVersion.v15) {} }
 	sealed class PostgreSQLDataProvider18 : PostgreSQLDataProvider { public PostgreSQLDataProvider18() : base(ProviderName.PostgreSQL18, PostgreSQLVersion.v18) {} }
+	sealed class PostgreSQLDataProvider19 : PostgreSQLDataProvider { public PostgreSQLDataProvider19() : base(ProviderName.PostgreSQL19, PostgreSQLVersion.v19) {} }
 #pragma warning restore MA0048 // File name must match type name
 
 	public abstract class PostgreSQLDataProvider : DynamicDataProviderBase<NpgsqlProviderAdapter>
@@ -46,14 +50,23 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			SqlProviderFlags.IsInsertOrUpdateSupported         = version is not PostgreSQLVersion.v92 and not PostgreSQLVersion.v93;
 			SqlProviderFlags.IsCommonTableExpressionsSupported = true;
 			SqlProviderFlags.IsSubQueryOrderBySupported        = true;
+			SqlProviderFlags.IsNullsOrderingSupported          = true;
+			SqlProviderFlags.DefaultNullsOrdering              = NullsDefaultOrdering.Largest; // PostgreSQL sorts NULL as the largest value
+			SqlProviderFlags.IsUnionAllOrderBySupported        = true;
 			SqlProviderFlags.IsAllSetOperationsSupported       = true;
 			SqlProviderFlags.IsDistinctFromSupported           = true;
+			SqlProviderFlags.IsDistinctOnSupported             = true;
 			SqlProviderFlags.SupportsPredicatesComparison      = true;
+			SqlProviderFlags.MaxColumnCount                    = 1600;
 
 			SqlProviderFlags.OutputDeleteUseSpecialTable  = version >= PostgreSQLVersion.v18;
 			SqlProviderFlags.OutputInsertUseSpecialTable  = version >= PostgreSQLVersion.v18;
 			SqlProviderFlags.OutputUpdateUseSpecialTables = version >= PostgreSQLVersion.v18;
 			SqlProviderFlags.OutputMergeUseSpecialTables  = version >= PostgreSQLVersion.v18;
+
+			// PostgreSQL added MERGE in v15. For earlier versions Upsert configurations that require
+			// MERGE lowering surface a descriptive error via Error_Upsert_MergeLowering_NotSupported.
+			SqlProviderFlags.IsUpsertWithMergeLoweringSupported = version >= PostgreSQLVersion.v15;
 
 			SqlProviderFlags.RowConstructorSupport = RowFeature.Equality        | RowFeature.Comparisons |
 			                                         RowFeature.CompareToSelect | RowFeature.In | RowFeature.IsNull |
@@ -66,7 +79,7 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			SetCharField("bpchar"   , (r,i) => r.GetString(i).TrimEnd(' '));
 			SetCharField("character", (r,i) => r.GetString(i).TrimEnd(' '));
 
-			SetProviderField<DbDataReader, DateTimeOffset, DateTime>((rd, i) => ConvertDateTimeToDateTimeOffset(rd.GetDateTime(i)));
+			SetProviderField<DbDataReader, DateTimeOffset, DateTime>((rd, i) => rd.GetFieldValue<DateTimeOffset>(i), "timestamp with time zone");
 
 			if (Adapter.SupportsBigInteger)
 				SetProviderField<DbDataReader, BigInteger, decimal>((rd, idx) => rd.GetFieldValue<BigInteger>(idx));
@@ -84,24 +97,15 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			ConfigureTypes();
 		}
 
-		static DateTimeOffset ConvertDateTimeToDateTimeOffset(DateTime dateTime)
-		{
-			// +/-infinity values returned as min/max DateTime
-			// and fail conversion to DateTimeOffset if local timezone offset is not +00:00 (for min or max value respectively)
-			if (dateTime == DateTime.MinValue)
-				return DateTimeOffset.MinValue;
-
-			if (dateTime == DateTime.MaxValue)
-				return DateTimeOffset.MaxValue;
-
-			return dateTime;
-		}
-
 		protected override IMemberTranslator CreateMemberTranslator()
 		{
 			return Version switch
 			{
+				>= PostgreSQLVersion.v19 => new PostgreSQL19MemberTranslator(),
+				>= PostgreSQLVersion.v18 => new PostgreSQL18MemberTranslator(),
 				>= PostgreSQLVersion.v13 => new PostgreSQL13MemberTranslator(),
+				>= PostgreSQLVersion.v11 => new PostgreSQL11MemberTranslator(),
+				>= PostgreSQLVersion.v95 => new PostgreSQL95MemberTranslator(),
 				_ => new PostgreSQLMemberTranslator(),
 			};
 		}
@@ -218,7 +222,7 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			if (typeName == null)
 				return null;
 
-			if (typeName.StartsWith("character("))
+			if (typeName.StartsWith("character(", StringComparison.Ordinal))
 				return "character";
 
 			return typeName;
@@ -233,15 +237,18 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 		/// This map shouldn't be used directly, you should resolve PostgreSQL types using
 		/// <see cref="GetNativeType(string, bool)"/> method, which takes into account different type aliases.
 		/// </summary>
-		private readonly IDictionary<string, NpgsqlProviderAdapter.NpgsqlDbType> _npgsqlTypeMap = new Dictionary<string, NpgsqlProviderAdapter.NpgsqlDbType>();
+		private readonly IDictionary<string, NpgsqlProviderAdapter.NpgsqlDbType> _npgsqlTypeMap = new Dictionary<string, NpgsqlProviderAdapter.NpgsqlDbType>(StringComparer.Ordinal);
 
 		private static string GetProviderName(PostgreSQLVersion version)
 		{
 			return version switch
 			{
+				PostgreSQLVersion.v19 => ProviderName.PostgreSQL19,
 				PostgreSQLVersion.v18 => ProviderName.PostgreSQL18,
-				PostgreSQLVersion.v13 => ProviderName.PostgreSQL13,
 				PostgreSQLVersion.v15 => ProviderName.PostgreSQL15,
+				PostgreSQLVersion.v13 => ProviderName.PostgreSQL13,
+				PostgreSQLVersion.v12 => ProviderName.PostgreSQL12,
+				PostgreSQLVersion.v11 => ProviderName.PostgreSQL11,
 				PostgreSQLVersion.v92 => ProviderName.PostgreSQL92,
 				PostgreSQLVersion.v93 => ProviderName.PostgreSQL93,
 				_                     => ProviderName.PostgreSQL95,
@@ -258,7 +265,9 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 
 		public override ISqlBuilder CreateSqlBuilder(MappingSchema mappingSchema, DataOptions dataOptions)
 		{
-			return new PostgreSQLSqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags);
+			return Version >= PostgreSQLVersion.v12
+				? new PostgreSQL12SqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags)
+				: new PostgreSQLSqlBuilder  (this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags);
 		}
 
 		readonly ISqlOptimizer _sqlOptimizer;
@@ -452,7 +461,7 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 			var idx = dbType.IndexOf("array", StringComparison.Ordinal);
 
 			if (idx == -1)
-				idx = dbType.IndexOf('[');
+				idx = dbType.IndexOf('[', StringComparison.Ordinal);
 
 			if (idx != -1)
 			{
@@ -548,40 +557,40 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 					break;
 			}
 
-			if (dbType.StartsWith("float(") && dbType.EndsWith(")"))
+			if (dbType.StartsWith("float(", StringComparison.Ordinal) && dbType.EndsWith(')'))
 			{
-				if (int.TryParse(dbType.Substring("float(".Length, dbType.Length - "float(".Length - 1), NumberStyles.Integer, NumberFormatInfo.InvariantInfo, out var precision))
+				if (int.TryParse(dbType.AsSpan("float(".Length, dbType.Length - "float(".Length - 1), NumberStyles.Integer, NumberFormatInfo.InvariantInfo, out var precision))
 				{
-					if (precision >= 1 && precision <= 24)
+					if (precision is >= 1 and <= 24)
 						dbType = "real";
-					else if (precision >= 25 && precision <= 53)
+					else if (precision is >= 25 and <= 53)
 						dbType = "real";
 					// else bad type
 				}
 			}
 
-			if (dbType.StartsWith("numeric(") || dbType.StartsWith("decimal"))
+			if (dbType.StartsWith("numeric(", StringComparison.Ordinal) || dbType.StartsWith("decimal", StringComparison.Ordinal))
 				dbType = "numeric";
 
-			if (dbType.StartsWith("varchar(") || dbType.StartsWith("character varying("))
+			if (dbType.StartsWith("varchar(", StringComparison.Ordinal) || dbType.StartsWith("character varying(", StringComparison.Ordinal))
 				dbType = "character varying";
 
-			if (dbType.StartsWith("char(") || dbType.StartsWith("character("))
+			if (dbType.StartsWith("char(", StringComparison.Ordinal) || dbType.StartsWith("character(", StringComparison.Ordinal))
 				dbType = "character";
 
-			if (dbType.StartsWith("interval"))
+			if (dbType.StartsWith("interval", StringComparison.Ordinal))
 				dbType = "interval";
 
-			if (dbType.StartsWith("timestamp"))
-				dbType = dbType.Contains("with time zone") ? "timestamp with time zone" : "timestamp";
+			if (dbType.StartsWith("timestamp", StringComparison.Ordinal))
+				dbType = dbType.Contains("with time zone", StringComparison.Ordinal) ? "timestamp with time zone" : "timestamp";
 
-			if (dbType.StartsWith("time(") || dbType.StartsWith("time "))
-				dbType = dbType.Contains("with time zone") ? "time with time zone" : "time";
+			if (dbType.StartsWith("time(", StringComparison.Ordinal) || dbType.StartsWith("time ", StringComparison.Ordinal))
+				dbType = dbType.Contains("with time zone", StringComparison.Ordinal) ? "time with time zone" : "time";
 
-			if (dbType.StartsWith("bit("))
+			if (dbType.StartsWith("bit(", StringComparison.Ordinal))
 				dbType = "bit";
 
-			if (dbType.StartsWith("bit varying("))
+			if (dbType.StartsWith("bit varying(", StringComparison.Ordinal))
 				dbType = "bit varying";
 
 			if (_npgsqlTypeMap.TryGetValue(dbType, out var result))
@@ -600,6 +609,7 @@ namespace LinqToDB.Internal.DataProvider.PostgreSQL
 		{
 			return version switch
 			{
+				PostgreSQLVersion.v19 => new PostgreSQLMappingSchema.PostgreSQL19MappingSchema(),
 				PostgreSQLVersion.v18 => new PostgreSQLMappingSchema.PostgreSQL18MappingSchema(),
 				PostgreSQLVersion.v15 => new PostgreSQLMappingSchema.PostgreSQL15MappingSchema(),
 				PostgreSQLVersion.v92 => new PostgreSQLMappingSchema.PostgreSQL92MappingSchema(),

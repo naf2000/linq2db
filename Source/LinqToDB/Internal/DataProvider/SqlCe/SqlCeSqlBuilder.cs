@@ -8,6 +8,7 @@ using LinqToDB.Internal.SqlProvider;
 using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Mapping;
 using LinqToDB.SqlQuery;
+using System;
 
 namespace LinqToDB.Internal.DataProvider.SqlCe
 {
@@ -47,22 +48,21 @@ namespace LinqToDB.Internal.DataProvider.SqlCe
 		protected override bool SupportsColumnAliasesInSource => false;
 		protected override bool RequiresConstantColumnAliases => true;
 
-		protected override bool CanSkipRootAliases(SqlStatement statement)
-		{
-			if (statement.SelectQuery != null)
-			{
-				// SQL CE doesn't support multiple columns with the same name in SELECT clause
-				return false;
-			}
-
-			return base.CanSkipRootAliases(statement);
-		}
+		// SQL CE resolves ORDER BY (and other name references) against the output projection, so two root
+		// columns rendering with the same result-set name make such a reference ambiguous - the server fails
+		// with "The column name cannot be resolved to a table ... ambiguous column". Final aliases are forced
+		// on a root column-name collision (PersonID / PersonID_1) to keep the names distinct. Verified needed
+		// by full-suite run (#5657). A bare duplicate-name SELECT alone is accepted; the failure is the name
+		// reference over it.
+		protected override bool RequiresUniqueRootColumnNames => true;
 
 		public override int CommandCount(SqlStatement statement)
 		{
-			if (statement is SqlTruncateTableStatement trun)
-				return trun.ResetIdentity ? 1 + trun.Table!.IdentityFields.Count : 1;
-			return statement.NeedsIdentity() ? 2 : 1;
+			return statement switch
+			{
+				SqlTruncateTableStatement trun => trun.ResetIdentity ? 1 + trun.Table!.IdentityFields.Count : 1,
+				_ => statement.NeedsIdentity ? 2 : 1,
+			};
 		}
 
 		protected override void BuildCommand(SqlStatement statement, int commandNumber)
@@ -98,7 +98,7 @@ namespace LinqToDB.Internal.DataProvider.SqlCe
 				case DataType.Date          :
 				case DataType.SmallDateTime : StringBuilder.Append("DateTime");                                                                                return;
 				case DataType.NVarChar:
-					if (type.Length == null || type.Length > 4000 || type.Length < 1)
+					if (type.Length is null or > 4000 or < 1)
 					{
 						StringBuilder.Append("NVarChar(4000)");
 						return;
@@ -108,12 +108,13 @@ namespace LinqToDB.Internal.DataProvider.SqlCe
 
 				case DataType.Binary:
 					StringBuilder.Append("BINARY");
-					if (type.Length > 1 && type.Length <= 8000)
+					if (type.Length is > 1 and <= 8000)
 						StringBuilder.Append(CultureInfo.InvariantCulture, $"({type.Length})");
 					return;
+
 				case DataType.VarBinary:
 					StringBuilder.Append("VARBINARY");
-					if (type.Length > 1 && type.Length <= 8000)
+					if (type.Length is > 1 and <= 8000)
 						StringBuilder.Append(CultureInfo.InvariantCulture, $"({type.Length})");
 					return;
 			}
@@ -145,14 +146,14 @@ namespace LinqToDB.Internal.DataProvider.SqlCe
 					if (value.Length > 0 && value[0] == '[')
 						return sb.Append(value);
 
-					if (value.IndexOf('.') > 0)
+					if (value.IndexOf('.', StringComparison.Ordinal) > 0)
 						value = string.Join("].[", value.Split('.'));
 
 					return sb.Append('[').Append(value).Append(']');
 
 				case ConvertType.SprocParameterToName:
 					return value.Length > 0 && value[0] == '@'
-						? sb.Append(value.Substring(1))
+						? sb.Append(value.AsSpan(1))
 						: sb.Append(value);
 			}
 
@@ -164,7 +165,14 @@ namespace LinqToDB.Internal.DataProvider.SqlCe
 			StringBuilder.Append("IDENTITY");
 		}
 
-		public override StringBuilder BuildObjectName(StringBuilder sb, SqlObjectName name, ConvertType objectType, bool escape, TableOptions tableOptions, bool withoutSuffix = false)
+		public override StringBuilder BuildObjectName(
+			StringBuilder sb,
+			SqlObjectName name,
+			ConvertType objectType = ConvertType.NameToQueryTable,
+			bool escape = true,
+			TableOptions tableOptions = TableOptions.NotSet,
+			bool withoutSuffix = false
+		)
 		{
 			return escape ? Convert(sb, name.Name, objectType) : sb.Append(name.Name);
 		}

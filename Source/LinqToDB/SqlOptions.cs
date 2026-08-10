@@ -1,18 +1,20 @@
-﻿using LinqToDB.Data;
+using System.Diagnostics.CodeAnalysis;
+
+using LinqToDB.Data;
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.Options;
 
 namespace LinqToDB
 {
 	/// <param name="EnableConstantExpressionInOrderBy">
-	/// If <c>true</c>, linq2db will allow any constant expressions in ORDER BY clause.
-	/// Default value: <c>false</c>.
+	/// If <see langword="true"/>, linq2db will allow any constant expressions in ORDER BY clause.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="GenerateFinalAliases">
 	/// Indicates whether SQL Builder should generate aliases for final projection.
 	/// It is not required for correct query processing but simplifies SQL analysis.
 	/// <para>
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// </para>
 	/// <example>
 	/// For the query
@@ -23,7 +25,7 @@ namespace LinqToDB
 	///       TrackId = child.ChildID,
 	///	   };
 	/// </code>
-	/// When property is <c>true</c>
+	/// When property is <see langword="true"/>
 	/// <code>
 	/// SELECT
 	///	   [child].[ChildID] as [TrackId]
@@ -54,7 +56,19 @@ namespace LinqToDB
 		{
 			EnableConstantExpressionInOrderBy = original.EnableConstantExpressionInOrderBy;
 			GenerateFinalAliases              = original.GenerateFinalAliases;
+			DefaultNullsPosition              = original.DefaultNullsPosition;
 		}
+
+		/// <summary>
+		/// Default position of <c>NULL</c> values in an <c>ORDER BY</c> clause for ordering keys that do not
+		/// specify a <see cref="Sql.NullsPosition"/> explicitly. When set to <see cref="Sql.NullsPosition.First"/>
+		/// or <see cref="Sql.NullsPosition.Last"/>, it is applied to every such key (and emulated for providers
+		/// without native <c>NULLS FIRST</c>/<c>NULLS LAST</c> support). A position specified explicitly on a key
+		/// always takes precedence — including an explicit <see cref="Sql.NullsPosition.None"/>, which opts that
+		/// key out of the default and uses the provider's natural null ordering.
+		/// Default value: <see cref="Sql.NullsPosition.None"/> (use the provider's default null ordering).
+		/// </summary>
+		public Sql.NullsPosition DefaultNullsPosition { get; init; } = Sql.NullsPosition.None;
 
 		int? _configurationID;
 		int IConfigurationID.ConfigurationID
@@ -67,6 +81,7 @@ namespace LinqToDB
 					_configurationID = idBuilder
 						.Add(EnableConstantExpressionInOrderBy)
 						.Add(GenerateFinalAliases)
+						.Add((int)DefaultNullsPosition)
 						.CreateID();
 				}
 
@@ -97,7 +112,7 @@ namespace LinqToDB
 
 		#region IEquatable implementation
 
-		public bool Equals(SqlOptions? other)
+		public bool Equals([NotNullWhen(true)] SqlOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

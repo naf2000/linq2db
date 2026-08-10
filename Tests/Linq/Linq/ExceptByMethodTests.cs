@@ -1,4 +1,4 @@
-﻿#if NET6_0_OR_GREATER
+﻿#if !NETFRAMEWORK
 
 using System;
 using System.Collections.Generic;
@@ -17,7 +17,7 @@ namespace Tests.Linq
 		[Table]
 		public class TestTable
 		{
-			[Column] public int Id { get; set; }
+			[PrimaryKey] public int Id { get; set; }
 			[Column] public int TestId { get; set; }
 		}
 
@@ -33,7 +33,6 @@ namespace Tests.Linq
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/4412")]
-		[ActiveIssue(Configuration = TestProvName.AllClickHouse, Details = "Wrong result for remote")]
 		[ThrowsCannotBeConverted([TestProvName.AllAccess, ProviderName.SqlCe, TestProvName.AllSybase, TestProvName.AllMySql57, TestProvName.AllFirebirdLess3])]
 		public void ExceptBy([DataSources] string context)
 		{
@@ -41,6 +40,7 @@ namespace Tests.Linq
 			using var table = db.CreateLocalTable(CreateTestTableData());
 
 			var query = table
+				.OrderBy(x => x.Id)
 				.ExceptBy(new[] { 20 }, x => x.TestId);
 
 			AssertQuery(query);
@@ -90,7 +90,6 @@ namespace Tests.Linq
 		}
 
 		[Test]
-		[ActiveIssue(Configuration = TestProvName.AllClickHouse, Details = "Wrong result for remote")]
 		[ThrowsCannotBeConverted([TestProvName.AllAccess, ProviderName.SqlCe, TestProvName.AllSybase, TestProvName.AllMySql57, TestProvName.AllFirebirdLess3])]
 		public void ExceptByOrderedResult([DataSources] string context)
 		{
@@ -98,6 +97,7 @@ namespace Tests.Linq
 			using var table = db.CreateLocalTable(CreateTestTableData());
 
 			var query = table
+				.OrderBy(x => x.Id)
 				.ExceptBy(new[] { 20 }, x => x.TestId)
 				.OrderByDescending(x => x.TestId)
 				.ThenBy(x => x.Id);

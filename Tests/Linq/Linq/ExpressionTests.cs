@@ -50,10 +50,7 @@ namespace Tests.Linq
 			}
 		}
 
-		public class ExpressionTestsFakeType
-		{
-
-		}
+		public class ExpressionTestsFakeType;
 
 		[Table]
 		private sealed class ExpressionTestClass
@@ -107,10 +104,8 @@ namespace Tests.Linq
 		[Test]
 		public void TestAsProperty([DataSources(false)] string context)
 		{
-			using (var db = new MyContext(context))
-			{
-				db.SomeValue.ShouldBe(10);
-			}
+			using var db = new MyContext(context);
+			db.SomeValue.ShouldBe(10);
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/4226")]
@@ -388,8 +383,6 @@ namespace Tests.Linq
 			var qry = from a in t1
 					   from b in Issue4674JoinTable<Issue4674StockRoomItem>(db, b => b.TenantId == a.TenantId && b.StockroomCode == a.Code)
 					   select new { a.TenantId, a.Code, a.Description, b.StockroomCode, b.Quantity };
-
-			;
 			Assert.That(() => qry.ToArray(), Throws.InstanceOf<LinqToDBException>()
 				.With.Message.Contain("The LINQ expression could not be converted to SQL."));
 		}

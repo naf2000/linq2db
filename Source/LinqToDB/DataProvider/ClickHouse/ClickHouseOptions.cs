@@ -1,4 +1,6 @@
-﻿using LinqToDB.Data;
+using System.Diagnostics.CodeAnalysis;
+
+using LinqToDB.Data;
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.DataProvider;
 using LinqToDB.Internal.Options;
@@ -11,7 +13,7 @@ namespace LinqToDB.DataProvider.ClickHouse
 	/// </param>
 	/// <param name="UseStandardCompatibleAggregates">
 	/// Enables -OrNull combinator for Min, Max, Sum and Avg aggregation functions to support SQL standard-compatible behavior.
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	public sealed record ClickHouseOptions
 	(
@@ -37,7 +39,7 @@ namespace LinqToDB.DataProvider.ClickHouse
 
 		#region IEquatable implementation
 
-		public bool Equals(ClickHouseOptions? other)
+		public bool Equals([NotNullWhen(true)] ClickHouseOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 #pragma warning disable MA0048 // File name must match type name
 
 // ReSharper disable UnusedMember.Global
@@ -132,7 +132,7 @@ namespace JetBrains.Annotations
 		/// <summary>Members of entity marked with attribute are considered used.</summary>
 		Members = 2,
 		/// <summary>Entity marked with attribute and all its members considered used.</summary>
-		WithMembers = Itself | Members
+		WithMembers = Itself | Members,
 	}
 
 	/// <summary>
@@ -182,9 +182,7 @@ namespace JetBrains.Annotations
 	/// }
 	/// </code></example>
 	[AttributeUsage(AttributeTargets.Method)]
-	internal sealed class PureAttribute : Attribute
-	{
-	}
+	internal sealed class PureAttribute : Attribute;
 
 	/// <summary>
 	/// Indicates that method is pure LINQ method, with postponed enumeration (like Enumerable.Select,
@@ -192,15 +190,11 @@ namespace JetBrains.Annotations
 	/// of delegate type by analyzing LINQ method chains.
 	/// </summary>
 	[AttributeUsage(AttributeTargets.Method)]
-	internal sealed class LinqTunnelAttribute : Attribute
-	{
-	}
+	internal sealed class LinqTunnelAttribute : Attribute;
 
 	/// <summary>
 	/// Indicates that IEnumerable, passed as parameter, is not enumerated.
 	/// </summary>
 	[AttributeUsage(AttributeTargets.Parameter)]
-	internal sealed class NoEnumerationAttribute : Attribute
-	{
-	}
+	internal sealed class NoEnumerationAttribute : Attribute;
 }

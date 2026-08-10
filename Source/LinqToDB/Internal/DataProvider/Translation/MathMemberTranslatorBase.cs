@@ -196,7 +196,7 @@ namespace LinqToDB.Internal.DataProvider.Translation
 
 		Expression? TranslateMathRoundMethod(ITranslationContext translationContext, MethodCallExpression methodCall, TranslationFlags translationFlags)
 		{
-			if ((translationFlags & TranslationFlags.Expression) != 0 && translationContext.CanBeEvaluatedOnClient(methodCall))
+			if (translationFlags.HasFlag(TranslationFlags.Expression) && translationContext.CanBeEvaluatedOnClient(methodCall))
 				return null;
 
 			var routing = MidpointRounding.ToEven;
@@ -249,7 +249,7 @@ namespace LinqToDB.Internal.DataProvider.Translation
 
 		Expression? TranslateRoundToEvenMethod(ITranslationContext translationContext, MethodCallExpression methodCall, TranslationFlags translationFlags)
 		{
-			if ((translationFlags & TranslationFlags.Expression) != 0 && translationContext.CanBeEvaluatedOnClient(methodCall))
+			if (translationFlags.HasFlag(TranslationFlags.Expression) && translationContext.CanBeEvaluatedOnClient(methodCall))
 				return null;
 
 			if (!translationContext.TranslateToSqlExpression(methodCall.Arguments[0], out var translatedValue))
@@ -281,7 +281,7 @@ namespace LinqToDB.Internal.DataProvider.Translation
 
 		Expression? TranslateRoundAwayFromZero(ITranslationContext translationContext, MethodCallExpression methodCall, TranslationFlags translationFlags)
 		{
-			if ((translationFlags & TranslationFlags.Expression) != 0 && translationContext.CanBeEvaluatedOnClient(methodCall))
+			if (translationFlags.HasFlag(TranslationFlags.Expression) && translationContext.CanBeEvaluatedOnClient(methodCall))
 				return null;
 
 			if (!translationContext.TranslateToSqlExpression(methodCall.Arguments[0], out var translatedValue))
@@ -313,7 +313,7 @@ namespace LinqToDB.Internal.DataProvider.Translation
 
 		Expression? TranslatePow(ITranslationContext translationContext, MethodCallExpression methodCall, TranslationFlags translationFlags)
 		{
-			if ((translationFlags & TranslationFlags.Expression) != 0 && translationContext.CanBeEvaluatedOnClient(methodCall))
+			if (translationFlags.HasFlag(TranslationFlags.Expression) && translationContext.CanBeEvaluatedOnClient(methodCall))
 				return null;
 
 			if (!translationContext.TranslateToSqlExpression(methodCall.Arguments[0], out var translatedX))
@@ -338,7 +338,7 @@ namespace LinqToDB.Internal.DataProvider.Translation
 
 			ISqlExpression? result = null;
 
-			if (precision == null || precision is SqlValue { Value: 0 })
+			if (precision is null or SqlValue { Value: 0 })
 			{
 				/*
 					CASE

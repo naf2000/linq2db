@@ -11,6 +11,7 @@ using LinqToDB.Mapping;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Text;
+using System.Globalization;
 
 #if NETFRAMEWORK
 using System.Buffers;
@@ -19,7 +20,8 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-//using System.Reflection.Metadata;
+using System.Threading.Channels;
+using System.Reflection.Metadata;
 
 using Microsoft.Extensions.Logging;
 #endif
@@ -41,7 +43,7 @@ internal static class DriverHelper
 	[
 		"LinqToDB",
 		"LinqToDB.Data",
-		"LinqToDB.Mapping"
+		"LinqToDB.Mapping",
 	];
 
 	/// <summary>
@@ -70,9 +72,15 @@ internal static class DriverHelper
 		RegisterResolver("Microsoft.Bcl.AsyncInterfaces", static () => typeof(IAsyncDisposable).Assembly);
 		RegisterResolver("Microsoft.Extensions.Logging.Abstractions", static () => typeof(ILogger).Assembly);
 		RegisterResolver("System.Collections.Immutable", static () => typeof(ImmutableArray).Assembly);
+		// Npgsql 8.0.9 references System.Threading.Channels 8.0.0.0; the driver ships 10.0.0.3.
+		RegisterResolver("System.Threading.Channels", static () => typeof(Channel).Assembly);
 
-		// not needed anymore?
-		//RegisterResolver("System.Reflection.Metadata", static () => typeof(Blob).Assembly);
+		// Needed again as of the Roslyn 5.6 bump (6.4.0): Microsoft.CodeAnalysis 5.6 references
+		// System.Reflection.Metadata 10.0.0.0, but the driver ships 10.0.0.1, and .NET Framework binds
+		// by exact version — without this resolver LINQPad 5 fails at model build with
+		// "FileLoadException: Could not load file or assembly 'System.Reflection.Metadata,
+		// Version=10.0.0.0' ... manifest definition does not match the assembly reference".
+		RegisterResolver("System.Reflection.Metadata", static () => typeof(Blob).Assembly);
 
 		AppDomain.CurrentDomain.DomainUnload += static (_, _) => DatabaseProviders.Unload();
 
@@ -82,7 +90,7 @@ internal static class DriverHelper
 			{
 				var requestedAssembly = new AssemblyName(args.Name!);
 
-				if (requestedAssembly.Name == asemblyName)
+				if (string.Equals(requestedAssembly.Name, asemblyName, StringComparison.Ordinal))
 					return resolver();
 
 				return null;
@@ -140,14 +148,14 @@ internal static class DriverHelper
 							break;
 						case TraceInfoStep.Completed:
 							// log data reader execution stats
-							executionManager.SqlTranslationWriter.WriteLine(FormattableString.Invariant($"-- Data read time: {info.ExecutionTime}. Records fetched: {info.RecordsAffected}.\r\n"));
+							executionManager.SqlTranslationWriter.WriteLine(string.Create(CultureInfo.InvariantCulture, $"-- Data read time: {info.ExecutionTime}. Records fetched: {info.RecordsAffected}.\r\n"));
 							break;
 						case TraceInfoStep.AfterExecute:
 							// log query execution stats
 							if (info.RecordsAffected != null)
-								executionManager.SqlTranslationWriter.WriteLine(FormattableString.Invariant($"-- Execution time: {info.ExecutionTime}. Records affected: {info.RecordsAffected}.\r\n"));
+								executionManager.SqlTranslationWriter.WriteLine(string.Create(CultureInfo.InvariantCulture, $"-- Execution time: {info.ExecutionTime}. Records affected: {info.RecordsAffected}.\r\n"));
 							else
-								executionManager.SqlTranslationWriter.WriteLine(FormattableString.Invariant($"-- Execution time: {info.ExecutionTime}\r\n"));
+								executionManager.SqlTranslationWriter.WriteLine(string.Create(CultureInfo.InvariantCulture, $"-- Execution time: {info.ExecutionTime}\r\n"));
 							break;
 					}
 				};
@@ -246,7 +254,7 @@ internal static class DriverHelper
 					throw new LinqToDBLinqPadException("Connection string is not specified");
 
 				if (model.DynamicConnection.SecondaryProvider != null
-					&& model.DynamicConnection.Provider.Name == model.DynamicConnection.SecondaryProvider.Name)
+					&& string.Equals(model.DynamicConnection.Provider.Name, model.DynamicConnection.SecondaryProvider.Name, StringComparison.Ordinal))
 					throw new LinqToDBLinqPadException("Secondary connection shouldn't use same provider type as primary connection");
 
 				if (model.DynamicConnection.Database.IsProviderPathSupported(model.DynamicConnection.Provider.Name))
@@ -286,7 +294,7 @@ internal static class DriverHelper
 	{
 		var error = new StringBuilder();
 
-		error.AppendLine(FormattableString.Invariant($"Unhandled error in method '{method}':"));
+		error.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Unhandled error in method '{method}':"));
 
 		var currEx = ex;
 

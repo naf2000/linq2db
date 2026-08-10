@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -113,16 +114,15 @@ namespace LinqToDB.Internal.Expressions
 			{
 				if (member.Type == parameter.ParameterType)
 				{
-					if (member.Name == parameter.Name)
+					if (string.Equals(member.Name, parameter.Name, StringComparison.Ordinal))
 					{
 						exactMatch = member.MemberInfo;
 						break;
 					}
 
-					if (member.Name.Equals(parameter.Name, StringComparison.InvariantCultureIgnoreCase))
+					if (member.Name.Equals(parameter.Name, StringComparison.OrdinalIgnoreCase))
 					{
 						nonCaseMatch = member.MemberInfo;
-						break;
 					}
 
 				}
@@ -134,7 +134,7 @@ namespace LinqToDB.Internal.Expressions
 		public SqlGenericConstructorExpression(MemberInitExpression memberInitExpression)
 		{
 			if (memberInitExpression.NewExpression.Members != null)
-				throw new NotImplementedException();
+				throw new InvalidOperationException("Expected initialization with no members.");
 
 			Parameters = GetMethodParameters(memberInitExpression.NewExpression.Constructor!, memberInitExpression.NewExpression.Arguments);
 
@@ -191,7 +191,7 @@ namespace LinqToDB.Internal.Expressions
 					}
 
 					default:
-						throw new NotImplementedException();
+						throw new InvalidOperationException($"Unsupported MemberBindingType `{binding.BindingType}`");
 				}
 			}
 
@@ -254,7 +254,7 @@ namespace LinqToDB.Internal.Expressions
 			/// <summary>
 			/// Object created as a result of method call (<see cref="MethodCallExpression"/>).
 			/// </summary>
-			MethodCall
+			MethodCall,
 		}
 
 		public SqlGenericConstructorExpression AppendAssignment(Assignment assignment)
@@ -280,7 +280,7 @@ namespace LinqToDB.Internal.Expressions
 
 			var result = new SqlGenericConstructorExpression(this)
 			{
-				Assignments = assignment
+				Assignments = assignment,
 			};
 
 			return result;
@@ -326,7 +326,7 @@ namespace LinqToDB.Internal.Expressions
 
 			var result = new SqlGenericConstructorExpression(this)
 			{
-				MappingSchema = mappingSchema
+				MappingSchema = mappingSchema,
 			};
 
 			return result;
@@ -345,7 +345,7 @@ namespace LinqToDB.Internal.Expressions
 			return true;
 		}
 
-		public bool Equals(SqlGenericConstructorExpression? other)
+		public bool Equals([NotNullWhen(true)] SqlGenericConstructorExpression? other)
 		{
 			if (ReferenceEquals(null, other))
 			{
@@ -365,14 +365,14 @@ namespace LinqToDB.Internal.Expressions
 
 			if (result)
 			{
-				result = EqualsLists(Assignments.OrderBy(a => a.MemberInfo.Name).ToList(),
-					other.Assignments.OrderBy(a => a.MemberInfo.Name).ToList(), Assignment.AssignmentComparer);
+				result = EqualsLists(Assignments.OrderBy(a => a.MemberInfo.Name, StringComparer.Ordinal).ToList(),
+					other.Assignments.OrderBy(a => a.MemberInfo.Name, StringComparer.Ordinal).ToList(), Assignment.AssignmentComparer);
 			}
 
 			return result;
 		}
 
-		public override bool Equals(object? obj)
+		public override bool Equals([NotNullWhen(true)] object? obj)
 		{
 			if (ReferenceEquals(null, obj))
 			{
@@ -530,6 +530,13 @@ namespace LinqToDB.Internal.Expressions
 				if (ReferenceEquals(expression, Expression))
 					return this;
 				return new Parameter(expression, ParameterInfo, MemberInfo);
+			}
+
+			public Parameter WithMember(MemberInfo? memberInfo)
+			{
+				if (ReferenceEquals(MemberInfo, memberInfo))
+					return this;
+				return new Parameter(Expression, ParameterInfo, memberInfo);
 			}
 
 			public override string ToString()

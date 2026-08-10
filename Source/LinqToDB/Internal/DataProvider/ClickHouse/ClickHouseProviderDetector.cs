@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Data.Common;
-using System.IO;
 
 using LinqToDB.Data;
 using LinqToDB.DataProvider;
@@ -20,15 +19,15 @@ namespace LinqToDB.Internal.DataProvider.ClickHouse
 		{
 			// don't merge this method and DetectProvider(provider type) logic because this method could return null
 			// and other method returns default provider type
-			if ((options.ProviderName?.Contains("Octonica") == true && options.ProviderName?.Contains("ClickHouse") == true)
-				|| (options.ConfigurationString?.Contains("Octonica") == true && options.ConfigurationString?.Contains("ClickHouse") == true))
+			if ((options.ProviderName?.Contains("Octonica", StringComparison.Ordinal) == true && options.ProviderName?.Contains("ClickHouse", StringComparison.Ordinal) == true)
+				|| (options.ConfigurationString?.Contains("Octonica", StringComparison.Ordinal) == true && options.ConfigurationString?.Contains("ClickHouse", StringComparison.Ordinal) == true))
 				return _octonicaDataProvider.Value;
 
-			if ((options.ProviderName?.Contains("ClickHouse") == true && options.ProviderName?.Contains("MySql") == true)
-				|| (options.ConfigurationString?.Contains("ClickHouse") == true && options.ConfigurationString?.Contains("MySql") == true))
+			if ((options.ProviderName?.Contains("ClickHouse", StringComparison.Ordinal) == true && options.ProviderName?.Contains("MySql", StringComparison.Ordinal) == true)
+				|| (options.ConfigurationString?.Contains("ClickHouse", StringComparison.Ordinal) == true && options.ConfigurationString?.Contains("MySql", StringComparison.Ordinal) == true))
 				return _mysqlDataProvider.Value;
 
-			if (options.ProviderName?.Contains("ClickHouse.Driver") == true || options.ConfigurationString?.Contains("ClickHouse.Driver") == true)
+			if (options.ProviderName?.Contains("ClickHouse.Driver", StringComparison.Ordinal) == true || options.ConfigurationString?.Contains("ClickHouse.Driver", StringComparison.Ordinal) == true)
 				return _clientDataProvider.Value;
 
 			return null;
@@ -56,25 +55,22 @@ namespace LinqToDB.Internal.DataProvider.ClickHouse
 			if (provider is ClickHouseProvider.ClickHouseDriver or ClickHouseProvider.MySqlConnector or ClickHouseProvider.Octonica)
 				return provider;
 
-			if ((options.ProviderName?.Contains("Octonica") == true && options.ProviderName?.Contains("ClickHouse") == true)
-				|| (options.ConfigurationString?.Contains("Octonica") == true && options.ConfigurationString?.Contains("ClickHouse") == true))
+			if ((options.ProviderName?.Contains("Octonica", StringComparison.Ordinal) == true && options.ProviderName?.Contains("ClickHouse", StringComparison.Ordinal) == true)
+				|| (options.ConfigurationString?.Contains("Octonica", StringComparison.Ordinal) == true && options.ConfigurationString?.Contains("ClickHouse", StringComparison.Ordinal) == true))
 				return ClickHouseProvider.Octonica;
 
-			if ((options.ProviderName?.Contains("ClickHouse") == true && options.ProviderName?.Contains("MySql") == true)
-				|| (options.ConfigurationString?.Contains("ClickHouse") == true && options.ConfigurationString?.Contains("MySql") == true))
+			if ((options.ProviderName?.Contains("ClickHouse", StringComparison.Ordinal) == true && options.ProviderName?.Contains("MySql", StringComparison.Ordinal) == true)
+				|| (options.ConfigurationString?.Contains("ClickHouse", StringComparison.Ordinal) == true && options.ConfigurationString?.Contains("MySql", StringComparison.Ordinal) == true))
 				return ClickHouseProvider.MySqlConnector;
 
-			if (options.ProviderName?.Contains("ClickHouse.Driver") == true || options.ConfigurationString?.Contains("ClickHouse.Driver") == true)
+			if (options.ProviderName?.Contains("ClickHouse.Driver", StringComparison.Ordinal) == true || options.ConfigurationString?.Contains("ClickHouse.Driver", StringComparison.Ordinal) == true)
 				return ClickHouseProvider.ClickHouseDriver;
 
-			var fileName = typeof(ClickHouseProviderDetector).Assembly.GetFileName();
-			var dirName  = Path.GetDirectoryName(fileName);
-
-			return File.Exists(Path.Combine(dirName ?? ".", ClickHouseProviderAdapter.OctonicaAssemblyName + ".dll"))
+			return Common.Tools.IsProviderAssemblyPresent(ClickHouseProviderAdapter.OctonicaAssemblyName)
 				? ClickHouseProvider.Octonica
-				: File.Exists(Path.Combine(dirName ?? ".", ClickHouseProviderAdapter.DriverAssemblyName + ".dll"))
+				: Common.Tools.IsProviderAssemblyPresent(ClickHouseProviderAdapter.DriverAssemblyName)
 					? ClickHouseProvider.ClickHouseDriver
-					: File.Exists(Path.Combine(dirName ?? ".", MySqlProviderAdapter.MySqlConnectorAssemblyName + ".dll"))
+					: Common.Tools.IsProviderAssemblyPresent(MySqlProviderAdapter.MySqlConnectorAssemblyName)
 						? ClickHouseProvider.MySqlConnector
 						: ClickHouseProvider.Octonica;
 		}

@@ -58,7 +58,7 @@ namespace LinqToDB.Mapping
 
 			return string.IsNullOrEmpty(Configuration) ?
 				attrs.Where(a => string.IsNullOrEmpty(a.Configuration)):
-				attrs.Where(a => Configuration ==     a.Configuration) ;
+				attrs.Where(a => string.Equals(Configuration, a.Configuration, StringComparison.Ordinal)) ;
 		}
 
 		#endregion
@@ -163,9 +163,9 @@ namespace LinqToDB.Mapping
 			Expression<Func<TProperty, TOtherKey>> otherKey,
 			bool?                                  canBeNull = null)
 		{
-			if (prop     == null) throw new ArgumentNullException(nameof(prop));
-			if (thisKey  == null) throw new ArgumentNullException(nameof(thisKey));
-			if (otherKey == null) throw new ArgumentNullException(nameof(otherKey));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(thisKey);
+			ArgumentNullException.ThrowIfNull(otherKey);
 
 			var thisKeyName  = MemberHelper.GetMemberInfo(thisKey).Name;
 			var otherKeyName = MemberHelper.GetMemberInfo(otherKey).Name;
@@ -195,9 +195,9 @@ namespace LinqToDB.Mapping
 			Expression<Func<TPropElement, TOtherKey>>            otherKey,
 			bool?                                                canBeNull = null)
 		{
-			if (prop     == null) throw new ArgumentNullException(nameof(prop));
-			if (thisKey  == null) throw new ArgumentNullException(nameof(thisKey));
-			if (otherKey == null) throw new ArgumentNullException(nameof(otherKey));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(thisKey);
+			ArgumentNullException.ThrowIfNull(otherKey);
 
 			var thisKeyName  = MemberHelper.GetMemberInfo(thisKey).Name;
 			var otherKeyName = MemberHelper.GetMemberInfo(otherKey).Name;
@@ -223,8 +223,8 @@ namespace LinqToDB.Mapping
 			Expression<Func<TEntity, TOther, bool>>        predicate,
 			bool?                                          canBeNull = null)
 		{
-			if (prop      == null) throw new ArgumentNullException(nameof(prop));
-			if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(predicate);
 
 			return Property( prop ).HasAttribute(new AssociationAttribute
 			{
@@ -246,8 +246,8 @@ namespace LinqToDB.Mapping
 			Expression<Func<TEntity, TOther, bool>> predicate,
 			bool?                                   canBeNull = null)
 		{
-			if (prop      == null) throw new ArgumentNullException(nameof(prop));
-			if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(predicate);
 
 			return Property( prop ).HasAttribute(new AssociationAttribute
 			{
@@ -269,8 +269,8 @@ namespace LinqToDB.Mapping
 			Expression<Func<TEntity, IDataContext, IQueryable<TOther>>> queryExpression,
 			bool?                                                       canBeNull = null)
 		{
-			if (prop            == null) throw new ArgumentNullException(nameof(prop));
-			if (queryExpression == null) throw new ArgumentNullException(nameof(queryExpression));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(queryExpression);
 
 			return Property( prop ).HasAttribute(new AssociationAttribute
 			{
@@ -292,8 +292,8 @@ namespace LinqToDB.Mapping
 			Expression<Func<TEntity, IDataContext, IQueryable<TOther>>> queryExpression,
 			bool?                                                       canBeNull = null)
 		{
-			if (prop            == null) throw new ArgumentNullException(nameof(prop));
-			if (queryExpression == null) throw new ArgumentNullException(nameof(queryExpression));
+			ArgumentNullException.ThrowIfNull(prop);
+			ArgumentNullException.ThrowIfNull(queryExpression);
 
 			return Property( prop ).HasAttribute(new AssociationAttribute
 			{
@@ -478,7 +478,7 @@ namespace LinqToDB.Mapping
 		{
 			return SetTable(a =>
 			{
-				if ((tableOptions & TableOptions.None) != 0)
+				if (tableOptions.HasFlag(TableOptions.None))
 					a.TableOptions = tableOptions;
 				else
 					a.TableOptions |= tableOptions;
@@ -492,7 +492,7 @@ namespace LinqToDB.Mapping
 		/// <param name="key">Discriminator member getter expression.</param>
 		/// <param name="value">Discriminator value.</param>
 		/// <param name="type">Mapping type, used with specified discriminator value.</param>
-		/// <param name="isDefault">If <c>true</c>, current mapping type used by default.</param>
+		/// <param name="isDefault">If <see langword="true"/>, current mapping type used by default.</param>
 		/// <returns>Returns current fluent entity mapping builder.</returns>
 		public EntityMappingBuilder<TEntity> Inheritance<TS>(Expression<Func<TEntity, TS>> key, TS value, Type type, bool isDefault = false)
 		{
@@ -503,64 +503,151 @@ namespace LinqToDB.Mapping
 			return this;
 		}
 
+		// Filter key used by the keyless HasQueryFilter overloads — addresses the default (anonymous) filter slot.
+		// Internal because the value is part of the wire shape between attribute storage and descriptor; consumers
+		// should round-trip via the keyless overloads, not by passing this literal directly.
+		internal const string DefaultQueryFilterKey = "";
+
 		/// <summary>
 		///     Specifies a LINQ predicate expression that will automatically be applied to any queries targeting
-		///     this entity type.
+		///     this entity type. Targets the default (anonymous) filter slot — equivalent to the keyed overload
+		///     called with an empty filter key.
 		/// </summary>
 		/// <param name="filter"> The LINQ predicate expression. </param>
 		/// <returns> The same builder instance so that multiple configuration calls can be chained. </returns>
 		public EntityMappingBuilder<TEntity> HasQueryFilter(Expression<Func<TEntity, IDataContext, bool>> filter)
 		{
-			return HasQueryFilter<IDataContext>(filter);
+			return HasQueryFilter<IDataContext>(DefaultQueryFilterKey, filter);
 		}
 
 		/// <summary>
 		///     Specifies a LINQ predicate expression that will automatically be applied to any queries targeting
-		///     this entity type.
+		///     this entity type. Targets the default (anonymous) filter slot.
 		/// </summary>
 		/// <param name="filter"> The LINQ predicate expression. </param>
 		/// <returns> The same builder instance so that multiple configuration calls can be chained. </returns>
 		public EntityMappingBuilder<TEntity> HasQueryFilter(Expression<Func<TEntity, bool>> filter)
 		{
-			var dcParam = Expression.Parameter(typeof(IDataContext), "dc");
-			var newFilter = Expression.Lambda<Func<TEntity, IDataContext, bool>>(filter.Body, [..filter.Parameters, dcParam]);
-			return HasQueryFilter<IDataContext>(newFilter);
+			return HasQueryFilter(DefaultQueryFilterKey, filter);
 		}
 
 		/// <summary>
 		///     Specifies a LINQ predicate expression that will automatically be applied to any queries targeting
-		///     this entity type.
+		///     this entity type. Targets the default (anonymous) filter slot.
 		/// </summary>
 		/// <param name="filter"> The LINQ predicate expression. </param>
 		/// <returns> The same builder instance so that multiple configuration calls can be chained. </returns>
 		public EntityMappingBuilder<TEntity> HasQueryFilter<TDataContext>(Expression<Func<TEntity, TDataContext, bool>> filter)
 			where TDataContext : IDataContext
 		{
-			return HasAttribute(new QueryFilterAttribute { FilterLambda = filter });
+			return HasQueryFilter(DefaultQueryFilterKey, filter);
 		}
 
 		/// <summary>
 		///     Specifies a LINQ <see cref="IQueryable{T}" /> function that will automatically be applied to any queries targeting
-		///     this entity type.
+		///     this entity type. Targets the default (anonymous) filter slot.
 		/// </summary>
 		/// <param name="filterFunc">Function which corrects input IQueryable.</param>
 		/// <returns> The same builder instance so that multiple configuration calls can be chained. </returns>
 		public EntityMappingBuilder<TEntity> HasQueryFilter(Func<IQueryable<TEntity>, IDataContext, IQueryable<TEntity>> filterFunc)
 		{
-			return HasQueryFilter<IDataContext>(filterFunc);
+			return HasQueryFilter<IDataContext>(DefaultQueryFilterKey, filterFunc);
 		}
 
 		/// <summary>
 		///     Specifies a LINQ <see cref="IQueryable{T}" /> function that will automatically be applied to any queries targeting
-		///     this entity type.
+		///     this entity type. Targets the default (anonymous) filter slot.
 		/// </summary>
 		/// <param name="filterFunc"> The LINQ predicate expression. </param>
 		/// <returns> The same builder instance so that multiple configuration calls can be chained. </returns>
 		public EntityMappingBuilder<TEntity> HasQueryFilter<TDataContext>(Func<IQueryable<TEntity>, TDataContext, IQueryable<TEntity>> filterFunc)
 			where TDataContext : IDataContext
 		{
-			HasAttribute(new QueryFilterAttribute { FilterFunc = filterFunc });
-			return this;
+			return HasQueryFilter(DefaultQueryFilterKey, filterFunc);
+		}
+
+		/// <summary>
+		///     Specifies a named LINQ predicate expression that will automatically be applied to any queries
+		///     targeting this entity type. Any number of filter keys may coexist on the same entity and are
+		///     AND-combined at query time.
+		///     <para>Passing <see langword="null"/> as <paramref name="filter"/> removes the previously registered
+		///     entry under <paramref name="filterKey"/>.</para>
+		/// </summary>
+		/// <param name="filterKey">Filter identifier. An empty string targets the anonymous (default) filter slot.</param>
+		/// <param name="filter">LINQ predicate expression, or <see langword="null"/> to remove the named entry.</param>
+		/// <returns>The same builder instance so that multiple configuration calls can be chained.</returns>
+		public EntityMappingBuilder<TEntity> HasQueryFilter(string filterKey, Expression<Func<TEntity, IDataContext, bool>>? filter)
+		{
+			return HasQueryFilter<IDataContext>(filterKey, filter);
+		}
+
+		/// <summary>
+		///     Specifies a named LINQ predicate expression that will automatically be applied to any queries
+		///     targeting this entity type.
+		///     <para>Passing <see langword="null"/> as <paramref name="filter"/> removes the previously registered
+		///     entry under <paramref name="filterKey"/>.</para>
+		/// </summary>
+		/// <param name="filterKey">Filter identifier. An empty string targets the anonymous (default) filter slot.</param>
+		/// <param name="filter">LINQ predicate expression, or <see langword="null"/> to remove the named entry.</param>
+		/// <returns>The same builder instance so that multiple configuration calls can be chained.</returns>
+		public EntityMappingBuilder<TEntity> HasQueryFilter(string filterKey, Expression<Func<TEntity, bool>>? filter)
+		{
+			ArgumentNullException.ThrowIfNull(filterKey);
+
+			if (filter == null)
+				return HasAttribute(new QueryFilterAttribute { FilterKey = filterKey });
+
+			var dcParam   = Expression.Parameter(typeof(IDataContext), "dc");
+			var newFilter = Expression.Lambda<Func<TEntity, IDataContext, bool>>(filter.Body, [..filter.Parameters, dcParam]);
+			return HasQueryFilter<IDataContext>(filterKey, newFilter);
+		}
+
+		/// <summary>
+		///     Specifies a named LINQ predicate expression with a custom <typeparamref name="TDataContext"/>
+		///     parameter that will automatically be applied to any queries targeting this entity type.
+		///     <para>Passing <see langword="null"/> as <paramref name="filter"/> removes the previously registered
+		///     entry under <paramref name="filterKey"/>.</para>
+		/// </summary>
+		/// <param name="filterKey">Filter identifier. An empty string targets the anonymous (default) filter slot.</param>
+		/// <param name="filter">LINQ predicate expression, or <see langword="null"/> to remove the named entry.</param>
+		/// <returns>The same builder instance so that multiple configuration calls can be chained.</returns>
+		public EntityMappingBuilder<TEntity> HasQueryFilter<TDataContext>(string filterKey, Expression<Func<TEntity, TDataContext, bool>>? filter)
+			where TDataContext : IDataContext
+		{
+			ArgumentNullException.ThrowIfNull(filterKey);
+
+			return HasAttribute(new QueryFilterAttribute { FilterKey = filterKey, FilterLambda = filter });
+		}
+
+		/// <summary>
+		///     Specifies a named LINQ <see cref="IQueryable{T}"/> function that will automatically be applied to any
+		///     queries targeting this entity type.
+		///     <para>Passing <see langword="null"/> as <paramref name="filterFunc"/> removes the previously
+		///     registered entry under <paramref name="filterKey"/>.</para>
+		/// </summary>
+		/// <param name="filterKey">Filter identifier. An empty string targets the anonymous (default) filter slot.</param>
+		/// <param name="filterFunc">Function which corrects input IQueryable, or <see langword="null"/> to remove the named entry.</param>
+		/// <returns>The same builder instance so that multiple configuration calls can be chained.</returns>
+		public EntityMappingBuilder<TEntity> HasQueryFilter(string filterKey, Func<IQueryable<TEntity>, IDataContext, IQueryable<TEntity>>? filterFunc)
+		{
+			return HasQueryFilter<IDataContext>(filterKey, filterFunc);
+		}
+
+		/// <summary>
+		///     Specifies a named LINQ <see cref="IQueryable{T}"/> function with a custom <typeparamref name="TDataContext"/>
+		///     parameter that will automatically be applied to any queries targeting this entity type.
+		///     <para>Passing <see langword="null"/> as <paramref name="filterFunc"/> removes the previously
+		///     registered entry under <paramref name="filterKey"/>.</para>
+		/// </summary>
+		/// <param name="filterKey">Filter identifier. An empty string targets the anonymous (default) filter slot.</param>
+		/// <param name="filterFunc">Function which corrects input IQueryable, or <see langword="null"/> to remove the named entry.</param>
+		/// <returns>The same builder instance so that multiple configuration calls can be chained.</returns>
+		public EntityMappingBuilder<TEntity> HasQueryFilter<TDataContext>(string filterKey, Func<IQueryable<TEntity>, TDataContext, IQueryable<TEntity>>? filterFunc)
+			where TDataContext : IDataContext
+		{
+			ArgumentNullException.ThrowIfNull(filterKey);
+
+			return HasAttribute(new QueryFilterAttribute { FilterKey = filterKey, FilterFunc = filterFunc });
 		}
 
 		#region Dynamic Properties
@@ -605,7 +692,7 @@ namespace LinqToDB.Mapping
 				{
 					GetterExpression = getter,
 					SetterExpression = setter,
-					Configuration    = Configuration
+					Configuration    = Configuration,
 				});
 
 			return this;

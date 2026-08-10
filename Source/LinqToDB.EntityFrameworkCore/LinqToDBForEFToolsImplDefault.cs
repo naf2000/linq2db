@@ -63,10 +63,10 @@ namespace LinqToDB.EntityFrameworkCore
 
 			private bool Equals(ProviderKey other)
 			{
-				return string.Equals(ProviderName, other.ProviderName) && string.Equals(ConnectionString, other.ConnectionString);
+				return string.Equals(ProviderName, other.ProviderName, StringComparison.Ordinal) && string.Equals(ConnectionString, other.ConnectionString, StringComparison.Ordinal);
 			}
 
-			public override bool Equals(object? obj)
+			public override bool Equals([NotNullWhen(true)] object? obj)
 			{
 				if (obj is null) return false;
 				if (ReferenceEquals(this, obj)) return true;
@@ -87,7 +87,7 @@ namespace LinqToDB.EntityFrameworkCore
 		private readonly MemoryCache _schemaCache = new(
 			new MemoryCacheOptions()
 			{
-				ExpirationScanFrequency = TimeSpan.FromHours(1.0)
+				ExpirationScanFrequency = TimeSpan.FromHours(1.0),
 			});
 
 		/// <summary>
@@ -190,9 +190,12 @@ namespace LinqToDB.EntityFrameworkCore
 				ProviderName.PostgreSQL92                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v92, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 				ProviderName.PostgreSQL93                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v93, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 				ProviderName.PostgreSQL95                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v95, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
+				ProviderName.PostgreSQL11                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v11, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
+				ProviderName.PostgreSQL12                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v12, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 				ProviderName.PostgreSQL13                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v13, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 				ProviderName.PostgreSQL15                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v15, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 				ProviderName.PostgreSQL18                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v18, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
+				ProviderName.PostgreSQL19                                                 => CreatePostgreSqlProvider(PostgreSQLVersion.v19, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 
 				ProviderName.SQLite or ProviderName.SQLiteMS                              => SQLiteTools.GetDataProvider(SQLiteProvider.Microsoft, connectionInfo.ConnectionString, connectionInfo.Connection, connectionInfo.Transaction),
 
@@ -406,10 +409,9 @@ namespace LinqToDB.EntityFrameworkCore
 			void MapEnumType(Type type)
 			{
 				var mapping = mappingSource?.FindMapping(type);
-				if (mapping?.GetType().Name == "NpgsqlEnumTypeMapping")
+				if (mapping is { } && string.Equals(mapping.GetType().Name, "NpgsqlEnumTypeMapping", StringComparison.Ordinal))
 				{
-					var labels = mapping.GetType().GetProperty("Labels")?.GetValue(mapping) as IReadOnlyDictionary<object, string>;
-					if (labels != null)
+					if (mapping.GetType().GetProperty("Labels")?.GetValue(mapping) is IReadOnlyDictionary<object, string> labels)
 					{
 						var typedLabels = labels.ToDictionary(kv => kv.Key, kv => $"'{kv.Value}'::{mapping.StoreType}");
 
@@ -567,10 +569,10 @@ namespace LinqToDB.EntityFrameworkCore
 					{
 						var member = (MemberExpression) expr;
 
-						if (member.Member.IsFieldEx())
+						if (member.Member.IsField)
 							return ((FieldInfo)member.Member).GetValue(EvaluateExpression(member.Expression));
 
-						if (member.Member.IsPropertyEx())
+						if (member.Member.IsProperty)
 							return ((PropertyInfo)member.Member).GetValue(EvaluateExpression(member.Expression), null);
 
 						break;
@@ -594,8 +596,8 @@ namespace LinqToDB.EntityFrameworkCore
 		/// <returns>Transformed expression.</returns>
 		public virtual Expression TransformExpression(Expression expression, IDataContext? dc, DbContext? ctx, IModel? model, bool isQueryExpression)
 		{
-			var visitor       = new TransformExpressionVisitor();
-			var newExpression = visitor.Transform(dc, model, expression);
+			using var visitor = TransformExpressionVisitor.Pool.Allocate();
+			var newExpression = visitor.Value.Transform(dc, model, expression);
 
 			if (ReferenceEquals(newExpression, expression))
 				return expression;
@@ -606,7 +608,7 @@ namespace LinqToDB.EntityFrameworkCore
 
 				bool tracking;
 
-				if (visitor.Tracking == null)
+				if (visitor.Value.Tracking == null)
 				{
 					if (ctx == null)
 					{
@@ -625,7 +627,7 @@ namespace LinqToDB.EntityFrameworkCore
 					}
 				}
 				else
-					tracking = visitor.Tracking.Value;
+					tracking = visitor.Value.Tracking.Value;
 
 				dataConnection.Tracking = tracking;
 			}
@@ -674,7 +676,7 @@ namespace LinqToDB.EntityFrameworkCore
 			return new EFConnectionInfo
 			{
 				ConnectionString = relational?.ConnectionString,
-				Connection = relational?.Connection
+				Connection = relational?.Connection,
 			};
 		}
 

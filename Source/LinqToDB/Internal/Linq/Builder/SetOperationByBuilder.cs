@@ -23,8 +23,8 @@ namespace LinqToDB.Internal.Linq.Builder
 #pragma warning restore CS8618
 		}
 
-		public static bool CanBuildMethod(MethodCallExpression call) 
-			=> call.IsQueryable() && call.Arguments.Count == 3;
+		public static bool CanBuildMethod(MethodCallExpression call)
+			=> call is { IsQueryable: true, Arguments.Count: 3 };
 
 		protected override BuildSequenceResult BuildMethodCall(ExpressionBuilder builder, MethodCallExpression methodCall, BuildInfo buildInfo)
 		{
@@ -40,19 +40,21 @@ namespace LinqToDB.Internal.Linq.Builder
 			var secondExpression = methodCall.Arguments[1];
 			var keySelector      = methodCall.Arguments[2].UnwrapLambda();
 
-			Expression transformedExpression;
+			// A preceding plain OrderBy bypasses OrderByBuilder (it is extracted here), so apply the configured
+			// default NULLS position to its keys, matching what OrderByBuilder would have done.
+			var defaultNulls = builder.DataOptions.SqlOptions.DefaultNullsPosition;
 
-			if (methodCall.Method.Name == nameof(Queryable.ExceptBy))
-				transformedExpression = BuildExceptBy(sourceExpression, secondExpression, keySelector, sourceType, keyType);
-			else if (methodCall.Method.Name == nameof(Queryable.IntersectBy))
-				transformedExpression = BuildIntersectBy(sourceExpression, secondExpression, keySelector, sourceType, keyType);
-			else
-				transformedExpression = BuildUnionBy(sourceExpression, secondExpression, keySelector, sourceType);
+			var transformedExpression = methodCall.Method.Name switch
+			{
+				nameof(Queryable.ExceptBy)    => BuildExceptBy   (sourceExpression, secondExpression, keySelector, sourceType, keyType, defaultNulls),
+				nameof(Queryable.IntersectBy) => BuildIntersectBy(sourceExpression, secondExpression, keySelector, sourceType, keyType, defaultNulls),
+				_                             => BuildUnionBy    (sourceExpression, secondExpression, keySelector, sourceType, defaultNulls),
+			};
 
 			return builder.TryBuildSequence(new BuildInfo(buildInfo, transformedExpression));
 		}
 
-		static Expression BuildExceptBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType, Type keyType)
+		static Expression BuildExceptBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType, Type keyType, Sql.NullsPosition defaultNulls)
 		{
 			source = BuildExpressionUtils.EnsureQueryable(source, sourceType);
 			second = BuildExpressionUtils.EnsureQueryable(second, keyType);
@@ -77,9 +79,9 @@ namespace LinqToDB.Internal.Linq.Builder
 			if (partitionPart.Length == 0)
 				partitionPart = [Expression.Constant(1)];
 
-			var orderByPart = BuildOrderByPart(source, parameter);
+			var orderByPart = BuildOrderByPart(source, parameter, defaultNulls);
 			if (orderByPart.Length == 0)
-				orderByPart = partitionPart.Select(p => (p, false)).ToArray();
+				orderByPart = partitionPart.Select(p => (p, false, Sql.NullsPosition.None)).ToArray();
 
 			var rnCall = WindowFunctionHelpers.BuildRowNumber(partitionPart, orderByPart);
 
@@ -116,7 +118,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				Expression.Quote(Expression.Lambda(resultBody, resultParam)));
 		}
 
-		static Expression BuildIntersectBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType, Type keyType)
+		static Expression BuildIntersectBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType, Type keyType, Sql.NullsPosition defaultNulls)
 		{
 			source = BuildExpressionUtils.EnsureQueryable(source, sourceType);
 			second = BuildExpressionUtils.EnsureQueryable(second, keyType);
@@ -140,9 +142,9 @@ namespace LinqToDB.Internal.Linq.Builder
 			if (partitionPart.Length == 0)
 				partitionPart = [ExpressionInstances.Constant1];
 
-			var orderByPart = BuildOrderByPart(source, parameter);
+			var orderByPart = BuildOrderByPart(source, parameter, defaultNulls);
 			if (orderByPart.Length == 0)
-				orderByPart = partitionPart.Select(p => (p, false)).ToArray();
+				orderByPart = partitionPart.Select(p => (p, false, Sql.NullsPosition.None)).ToArray();
 
 			var rnCall = WindowFunctionHelpers.BuildRowNumber(partitionPart, orderByPart);
 
@@ -179,7 +181,7 @@ namespace LinqToDB.Internal.Linq.Builder
 				Expression.Quote(Expression.Lambda(resultBody, resultParam)));
 		}
 
-		static Expression BuildUnionBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType)
+		static Expression BuildUnionBy(Expression source, Expression second, LambdaExpression keySelector, Type sourceType, Sql.NullsPosition defaultNulls)
 		{
 			source = BuildExpressionUtils.EnsureQueryable(source, sourceType);
 			second = BuildExpressionUtils.EnsureQueryable(second, sourceType);
@@ -221,14 +223,14 @@ namespace LinqToDB.Internal.Linq.Builder
 			if (partitionPart.Length == 0)
 				partitionPart = [ExpressionInstances.Constant1];
 
-			var sourceOrderBy = BuildOrderByPart(source, dataBody);
-			var orderByList = new System.Collections.Generic.List<(Expression expr, bool isDescending)>
+			var sourceOrderBy = BuildOrderByPart(source, dataBody, defaultNulls);
+			var orderByList = new System.Collections.Generic.List<(Expression expr, bool isDescending, Sql.NullsPosition nulls)>
 			{
-				(Expression.PropertyOrField(rowItem, nameof(UnionByTuple<>.SourceIndex)), false)
+				(Expression.PropertyOrField(rowItem, nameof(UnionByTuple<>.SourceIndex)), false, Sql.NullsPosition.None),
 			};
 
 			if (sourceOrderBy.Length == 0)
-				orderByList.AddRange(partitionPart.Select(p => (p, false)));
+				orderByList.AddRange(partitionPart.Select(p => (p, false, Sql.NullsPosition.None)));
 			else
 				orderByList.AddRange(sourceOrderBy);
 
@@ -270,14 +272,14 @@ namespace LinqToDB.Internal.Linq.Builder
 				Expression.Quote(Expression.Lambda(resultBody, resultParam)));
 		}
 
-		static (Expression expr, bool isDescending)[] BuildOrderByPart(Expression source, Expression parameter)
+		static (Expression expr, bool isDescending, Sql.NullsPosition nulls)[] BuildOrderByPart(Expression source, Expression parameter, Sql.NullsPosition defaultNulls)
 		{
 			var orderByPart = WindowFunctionHelpers.ExtractOrderByPart(source, out _);
 			if (orderByPart.Length == 0)
 				return [];
 
 			return orderByPart
-				.Select(o => (o.lambda.GetBody(parameter), o.isDescending))
+				.Select(o => (o.lambda.GetBody(parameter), o.isDescending, o.nulls ?? defaultNulls))
 				.ToArray();
 		}
 	}

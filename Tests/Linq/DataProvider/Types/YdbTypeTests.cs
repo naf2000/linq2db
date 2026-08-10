@@ -22,7 +22,7 @@ namespace Tests.DataProvider
 		sealed class YdbDataSourcesAttribute : IncludeDataSourcesAttribute
 		{
 			public YdbDataSourcesAttribute()
-				: base(ProviderName.Ydb)
+				: base(TestProvName.AllYdb)
 			{
 			}
 		}
@@ -371,7 +371,7 @@ namespace Tests.DataProvider
 
 					var maxString = new string('9', p);
 					if (s > 0)
-						maxString = maxString.Substring(0, p - s) + '.' + maxString.Substring(p - s);
+						maxString = $"{maxString.Substring(0, p - s)}.{maxString.Substring(p - s)}";
 					if (maxString[0] == '.')
 						maxString = $"0{maxString}";
 					var minString = $"-{maxString}";
@@ -564,7 +564,7 @@ namespace Tests.DataProvider
 		[Test]
 		public async ValueTask TestTimestamp([YdbDataSources] string context)
 		{
-			// A moment in time in UTC, precision to the second
+			// A moment in time in UTC, precision to the microsecond
 			// from 00:00 01.01.1970 to 00:00 01.01.2106
 
 			var min = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);

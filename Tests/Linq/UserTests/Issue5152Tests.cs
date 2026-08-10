@@ -25,8 +25,7 @@ namespace Tests.UserTests
 
 			protected MySpecialBaseClass(string value)
 			{
-				if (value == null)
-					throw new ArgumentNullException(nameof(value));
+				ArgumentNullException.ThrowIfNull(value);
 
 				Value = value;
 			}
@@ -164,9 +163,13 @@ namespace Tests.UserTests
 								  .Update();
 
 			if (db is DataConnection dc)
-				Assert.That(dc.LastQuery?.ToLowerInvariant(), Does.Not.Contain("cast(")
-					.And.Not.Contain("::")
-					.And.Not.Contain("cstr("));
+			{
+				var lastQuery = dc.LastQuery?.ToLowerInvariant();
+				Assert.That(lastQuery, Does.Not.Contain("cast(").And.Not.Contain("cstr("));
+				// YQL uses "::" as a function-namespace separator (e.g. unicode::replaceall), not a cast.
+				if (!context.IsAnyOf(TestProvName.AllYdb))
+					Assert.That(lastQuery, Does.Not.Contain("::"));
+			}
 		}
 
 		[Test]
@@ -198,7 +201,7 @@ namespace Tests.UserTests
 				Assert.That(dc.LastQuery?.ToLowerInvariant(), Does.Not.Contain("cast(")
 					.And.Not.Contain("cstr("));
 
-				if (!context.IsAnyOf(ProviderName.Ydb))
+				if (!context.IsAnyOf(TestProvName.AllYdb))
 					Assert.That(dc.LastQuery?.ToLowerInvariant(), Does.Not.Contain("::"));
 			}
 		}

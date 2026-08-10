@@ -9,6 +9,7 @@ using LinqToDB.Data;
 using LinqToDB.DataProvider.MySql;
 using LinqToDB.Internal.DataProvider.MySql.Translation;
 using LinqToDB.Internal.SqlProvider;
+using LinqToDB.Internal.SqlQuery;
 using LinqToDB.Linq.Translation;
 using LinqToDB.Mapping;
 using LinqToDB.SchemaProvider;
@@ -16,12 +17,12 @@ using LinqToDB.SchemaProvider;
 namespace LinqToDB.Internal.DataProvider.MySql
 {
 #pragma warning disable MA0048 // File name must match type name
-	sealed class MySql57DataProviderMySqlData()        : MySqlDataProvider(ProviderName.MySql57MySqlData,        MySqlVersion.MySql57,   MySqlProvider.MySqlData     ) { }
-	sealed class MySql57DataProviderMySqlConnector()   : MySqlDataProvider(ProviderName.MySql57MySqlConnector,   MySqlVersion.MySql57,   MySqlProvider.MySqlConnector) { }
-	sealed class MySql80DataProviderMySqlData()        : MySqlDataProvider(ProviderName.MySql80MySqlData,        MySqlVersion.MySql80,   MySqlProvider.MySqlData     ) { }
-	sealed class MySql80DataProviderMySqlConnector()   : MySqlDataProvider(ProviderName.MySql80MySqlConnector,   MySqlVersion.MySql80,   MySqlProvider.MySqlConnector) { }
-	sealed class MariaDB10DataProviderMySqlData()      : MySqlDataProvider(ProviderName.MariaDB10MySqlData,      MySqlVersion.MariaDB10, MySqlProvider.MySqlData     ) { }
-	sealed class MariaDB10DataProviderMySqlConnector() : MySqlDataProvider(ProviderName.MariaDB10MySqlConnector, MySqlVersion.MariaDB10, MySqlProvider.MySqlConnector) { }
+	sealed class MySql57DataProviderMySqlData()        : MySqlDataProvider(ProviderName.MySql57MySqlData,        MySqlVersion.MySql57,   MySqlProvider.MySqlData     );
+	sealed class MySql57DataProviderMySqlConnector()   : MySqlDataProvider(ProviderName.MySql57MySqlConnector,   MySqlVersion.MySql57,   MySqlProvider.MySqlConnector);
+	sealed class MySql80DataProviderMySqlData()        : MySqlDataProvider(ProviderName.MySql80MySqlData,        MySqlVersion.MySql80,   MySqlProvider.MySqlData     );
+	sealed class MySql80DataProviderMySqlConnector()   : MySqlDataProvider(ProviderName.MySql80MySqlConnector,   MySqlVersion.MySql80,   MySqlProvider.MySqlConnector);
+	sealed class MariaDB10DataProviderMySqlData()      : MySqlDataProvider(ProviderName.MariaDB10MySqlData,      MySqlVersion.MariaDB10, MySqlProvider.MySqlData     );
+	sealed class MariaDB10DataProviderMySqlConnector() : MySqlDataProvider(ProviderName.MariaDB10MySqlConnector, MySqlVersion.MariaDB10, MySqlProvider.MySqlConnector);
 #pragma warning restore MA0048 // File name must match type name
 
 	public abstract class MySqlDataProvider : DynamicDataProviderBase<MySqlProviderAdapter>
@@ -30,31 +31,45 @@ namespace LinqToDB.Internal.DataProvider.MySql
 			: base(name, GetMappingSchema(provider, version), MySqlProviderAdapter.GetInstance(provider))
 		{
 			Provider = provider;
-			Version  = version;
+			Version = version;
 
-			SqlProviderFlags.IsSubQueryOrderBySupported        = true;
+			SqlProviderFlags.IsSubQueryOrderBySupported = true;
+			SqlProviderFlags.IsUnionAllOrderBySupported = true;
 			SqlProviderFlags.IsCommonTableExpressionsSupported = version > MySqlVersion.MySql57;
-			SqlProviderFlags.IsUpdateFromSupported             = false;
-			SqlProviderFlags.IsNamingQueryBlockSupported       = true;
-			SqlProviderFlags.IsDistinctFromSupported           = true;
-			SqlProviderFlags.SupportsPredicatesComparison      = true;
-			SqlProviderFlags.IsAllSetOperationsSupported       = version > MySqlVersion.MySql57;
-			SqlProviderFlags.IsDistinctSetOperationsSupported  = version > MySqlVersion.MySql57;
+			SqlProviderFlags.IsUpdateFromSupported = false;
+			SqlProviderFlags.IsNamingQueryBlockSupported = true;
+			SqlProviderFlags.IsDistinctFromSupported = true;
+			SqlProviderFlags.SupportsPredicatesComparison = true;
+			SqlProviderFlags.IsAllSetOperationsSupported = version > MySqlVersion.MySql57;
+			SqlProviderFlags.IsDistinctSetOperationsSupported = version > MySqlVersion.MySql57;
 			// MariaDB still lacking it
 			// https://jira.mariadb.org/browse/MDEV-6373
 			// https://jira.mariadb.org/browse/MDEV-19078
-			SqlProviderFlags.IsApplyJoinSupported              = version == MySqlVersion.MySql80;
+			SqlProviderFlags.IsApplyJoinSupported = version == MySqlVersion.MySql80;
 			SqlProviderFlags.IsCrossApplyJoinSupportsCondition = version == MySqlVersion.MySql80;
 			SqlProviderFlags.IsOuterApplyJoinSupportsCondition = version == MySqlVersion.MySql80;
-			SqlProviderFlags.IsWindowFunctionsSupported        = Version >= MySqlVersion.MySql80;
+			SqlProviderFlags.IsWindowFunctionsSupported = Version >= MySqlVersion.MySql80;
 
 			SqlProviderFlags.IsSubqueryWithParentReferenceInJoinConditionSupported = false;
-			SqlProviderFlags.SupportedCorrelatedSubqueriesLevel                    = (version > MySqlVersion.MySql57) && version != MySqlVersion.MariaDB10 ? null : 1;
+			SqlProviderFlags.SupportedCorrelatedSubqueriesLevel = version is > MySqlVersion.MySql57 and not MySqlVersion.MariaDB10 ? null : 1;
 			SqlProviderFlags.CalculateSupportedCorrelatedLevelWithAggregateQueries = true;
-			SqlProviderFlags.RowConstructorSupport                                 = RowFeature.Equality | RowFeature.Comparisons | RowFeature.CompareToSelect | RowFeature.In;
+			SqlProviderFlags.RowConstructorSupport = RowFeature.Equality | RowFeature.Comparisons | RowFeature.CompareToSelect | RowFeature.In;
 
-			SqlProviderFlags.IsUpdateTakeSupported                   = true;
+			SqlProviderFlags.IsUpdateTakeSupported = true;
 			SqlProviderFlags.IsTakeWithInAllAnySomeSubquerySupported = false;
+			SqlProviderFlags.MaxColumnCount = 4096;
+
+			// MySQL/MariaDB emit InsertOrUpdate as INSERT ... ON DUPLICATE KEY UPDATE, which
+			// has no WHERE clause on the UPDATE branch. Route Upsert.Update.When through
+			// the alternative UPDATE→INSERT emulation instead.
+			SqlProviderFlags.IsInsertOrUpdateWithPredicateSupported  = false;
+
+			// MySQL / MariaDB have no MERGE statement. Upsert configurations that require MERGE
+			// lowering (bulk source, non-PK match, Insert.When, SkipInsert/SkipUpdate) surface
+			// a descriptive error via Error_Upsert_MergeLowering_NotSupported.
+			SqlProviderFlags.IsUpsertWithMergeLoweringSupported      = false;
+			// MySQL/MariaDB sort NULL as the smallest value (ascending => NULLS FIRST, descending => NULLS LAST).
+			SqlProviderFlags.DefaultNullsOrdering = NullsDefaultOrdering.Smallest;
 
 			_sqlOptimizer = new MySqlSqlOptimizer(SqlProviderFlags);
 
@@ -69,6 +84,10 @@ namespace LinqToDB.Internal.DataProvider.MySql
 			{
 				SetProviderField<DateTimeOffset>(Adapter.GetDateTimeOffsetMethodName, Adapter.DataReaderType);
 				SetToTypeField(typeof(DateTimeOffset), Adapter.GetDateTimeOffsetMethodName, Adapter.DataReaderType);
+			}
+			else if (Provider == MySqlProvider.MySqlData)
+			{
+				SetProviderField<DbDataReader, DateTimeOffset, DateTime>((r, i) => new DateTimeOffset(r.GetDateTime(i), default));
 			}
 
 			SetProviderField(Adapter.MySqlDateTimeType, Adapter.GetMySqlDateTimeMethodName, Adapter.DataReaderType);
@@ -90,7 +109,13 @@ namespace LinqToDB.Internal.DataProvider.MySql
 
 		protected override IMemberTranslator CreateMemberTranslator()
 		{
-			return new MySqlMemberTranslator();
+			return Version switch
+			{
+				MySqlVersion.MariaDB10 => new MariaDBMemberTranslator(),
+				MySqlVersion.MySql80   => new MySql80MemberTranslator(),
+				MySqlVersion.MySql57   => new MySql57MemberTranslator(),
+				_                      => new MySqlMemberTranslator(),
+			};
 		}
 
 		public override ISchemaProvider GetSchemaProvider()
@@ -107,12 +132,12 @@ namespace LinqToDB.Internal.DataProvider.MySql
 
 		public override ISqlBuilder CreateSqlBuilder(MappingSchema mappingSchema, DataOptions dataOptions)
 		{
-			if (Version == MySqlVersion.MySql57)
-				return new MySql57SqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags);
-			if (Version == MySqlVersion.MySql80)
-				return new MySql80SqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags);
-
-			return new MariaDBSqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags);
+			return Version switch
+			{
+				MySqlVersion.MySql57 => new MySql57SqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags),
+				MySqlVersion.MySql80 => new MySql80SqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags),
+				_ => new MariaDBSqlBuilder(this, mappingSchema, dataOptions, GetSqlOptimizer(dataOptions), SqlProviderFlags),
+			};
 		}
 
 		private static MappingSchema GetMappingSchema(MySqlProvider provider, MySqlVersion version)
@@ -205,8 +230,7 @@ namespace LinqToDB.Internal.DataProvider.MySql
 
 		public override BulkCopyRowsCopied BulkCopy<T>(DataOptions options, ITable<T> table, IEnumerable<T> source)
 		{
-			if (source == null)
-				throw new ArgumentNullException(nameof(source));
+			ArgumentNullException.ThrowIfNull(source);
 
 			return new MySqlBulkCopy(this).BulkCopy(
 				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
@@ -220,8 +244,7 @@ namespace LinqToDB.Internal.DataProvider.MySql
 		public override Task<BulkCopyRowsCopied> BulkCopyAsync<T>(DataOptions options, ITable<T> table,
 			IEnumerable<T> source, CancellationToken cancellationToken)
 		{
-			if (source == null)
-				throw new ArgumentNullException(nameof(source));
+			ArgumentNullException.ThrowIfNull(source);
 
 			return new MySqlBulkCopy(this).BulkCopyAsync(
 				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?
@@ -236,8 +259,7 @@ namespace LinqToDB.Internal.DataProvider.MySql
 		public override Task<BulkCopyRowsCopied> BulkCopyAsync<T>(DataOptions options, ITable<T> table,
 			IAsyncEnumerable<T> source, CancellationToken cancellationToken)
 		{
-			if (source == null)
-				throw new ArgumentNullException(nameof(source));
+			ArgumentNullException.ThrowIfNull(source);
 
 			return new MySqlBulkCopy(this).BulkCopyAsync(
 				options.BulkCopyOptions.BulkCopyType == BulkCopyType.Default ?

@@ -18,7 +18,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 		public static bool CanBuildMethod(MethodCallExpression call)
 		{
-			if (!call.IsQueryable())
+			if (!call.IsQueryable)
 				return false;
 			
 			var lambda = (LambdaExpression)call.Arguments[1].Unwrap();
@@ -98,7 +98,7 @@ namespace LinqToDB.Internal.Linq.Builder
 
 						var orderQuery = orderSequence.SelectQuery;
 
-						var orderBy  = orderQuery.OrderBy.Items.Select(o => new SqlWindowOrderItem(o.Expression, o.IsDescending, Sql.NullsPosition.None));
+						var orderBy  = orderQuery.OrderBy.Items.Select(o => new SqlWindowOrderItem(o.Expression, o.IsDescending, o.NullsPosition));
 						var longType = MappingSchema.GetDbDataType(typeof(long));
 						var rn       = new SqlExtendedFunction(longType, "ROW_NUMBER", [], [], orderBy : orderBy);
 						var sql      = new SqlBinaryExpression(longType, rn, "-", new SqlValue(longType, 1));

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Data.Common;
-using System.IO;
 
 using LinqToDB.Data;
 using LinqToDB.DataProvider;
@@ -18,7 +17,7 @@ namespace LinqToDB.Internal.DataProvider.Access
 
 		public override IDataProvider? DetectProvider(ConnectionOptions options)
 		{
-			if (options.ProviderName != ProviderName.Access && options.ConfigurationString?.Contains("DataAccess") == true)
+			if (!string.Equals(options.ProviderName, ProviderName.Access, StringComparison.Ordinal) && options.ConfigurationString?.Contains("DataAccess", StringComparison.Ordinal) == true)
 			{
 				// when provider name is not set to known access provider name, we must check that we don't have detection
 				// conflict with providers that use very "unique" Access substring like Oracle*DataAccess providers
@@ -27,16 +26,16 @@ namespace LinqToDB.Internal.DataProvider.Access
 
 			// don't merge this method and DetectProvider(provider type) logic because this method could return null
 			// and other method returns default provider type
-			if (options.ConnectionString?.Contains("Microsoft.ACE.OLEDB") == true)
+			if (options.ConnectionString?.Contains("Microsoft.ACE.OLEDB", StringComparison.Ordinal) == true)
 				return _accessAceOleDbDataProvider.Value;
 
-			if (options.ConnectionString?.Contains("Microsoft.Jet.OLEDB") == true)
+			if (options.ConnectionString?.Contains("Microsoft.Jet.OLEDB", StringComparison.Ordinal) == true)
 				return _accessJetOleDbDataProvider.Value;
 
-			if (options.ConnectionString?.Contains("(*.mdb, *.accdb)") == true)
+			if (options.ConnectionString?.Contains("(*.mdb, *.accdb)", StringComparison.Ordinal) == true)
 				return _accessAceODBCDataProvider.Value;
 
-			if (options.ConnectionString?.Contains("(*.mdb)") == true)
+			if (options.ConnectionString?.Contains("(*.mdb)", StringComparison.Ordinal) == true)
 				return _accessJetODBCDataProvider.Value;
 
 			switch (options.ProviderName)
@@ -47,13 +46,13 @@ namespace LinqToDB.Internal.DataProvider.Access
 				case ProviderName.AccessAceOleDb: return _accessAceOleDbDataProvider.Value;
 			}
 
-			if (options.ConfigurationString?.Contains("Access") == true)
+			if (options.ConfigurationString?.Contains("Access", StringComparison.Ordinal) == true)
 			{
 				var version = AccessVersion.AutoDetect;
 
-				if (options.ConfigurationString.Contains("Jet"))
+				if (options.ConfigurationString.Contains("Jet", StringComparison.Ordinal))
 					version = AccessVersion.Jet;
-				else if (options.ConfigurationString.Contains("Ace"))
+				else if (options.ConfigurationString.Contains("Ace", StringComparison.Ordinal))
 					version = AccessVersion.Ace;
 
 				var provider = DetectProvider(options, AccessProvider.AutoDetect);
@@ -129,16 +128,16 @@ namespace LinqToDB.Internal.DataProvider.Access
 			if (provider is AccessProvider.ODBC or AccessProvider.OleDb)
 				return provider;
 
-			if (options.ConnectionString?.Contains("Microsoft.ACE.OLEDB") == true)
+			if (options.ConnectionString?.Contains("Microsoft.ACE.OLEDB", StringComparison.Ordinal) == true)
 				return AccessProvider.OleDb;
 
-			if (options.ConnectionString?.Contains("Microsoft.Jet.OLEDB") == true)
+			if (options.ConnectionString?.Contains("Microsoft.Jet.OLEDB", StringComparison.Ordinal) == true)
 				return AccessProvider.OleDb;
 
-			if (options.ConnectionString?.Contains("(*.mdb, *.accdb)") == true)
+			if (options.ConnectionString?.Contains("(*.mdb, *.accdb)", StringComparison.Ordinal) == true)
 				return AccessProvider.ODBC;
 
-			if (options.ConnectionString?.Contains("(*.mdb)") == true)
+			if (options.ConnectionString?.Contains("(*.mdb)", StringComparison.Ordinal) == true)
 				return AccessProvider.ODBC;
 
 			switch (options.ProviderName)
@@ -150,18 +149,15 @@ namespace LinqToDB.Internal.DataProvider.Access
 				case ProviderName.AccessAceOleDb: return AccessProvider.OleDb;
 			}
 
-			if (options.ConfigurationString?.Contains("Access") == true)
+			if (options.ConfigurationString?.Contains("Access", StringComparison.Ordinal) == true)
 			{
-				if (options.ConfigurationString.Contains("Access.Odbc"))
+				if (options.ConfigurationString.Contains("Access.Odbc", StringComparison.Ordinal))
 					return AccessProvider.ODBC;
-				else if (options.ConfigurationString.Contains("Access.OleDb"))
+				else if (options.ConfigurationString.Contains("Access.OleDb", StringComparison.Ordinal))
 					return AccessProvider.OleDb;
 			}
 
-			var fileName = typeof(AccessProviderDetector).Assembly.GetFileName();
-			var dirName  = Path.GetDirectoryName(fileName);
-
-			return File.Exists(Path.Combine(dirName ?? ".", OdbcProviderAdapter.AssemblyName + ".dll"))
+			return Common.Tools.IsProviderAssemblyPresent(OdbcProviderAdapter.AssemblyName)
 				? AccessProvider.ODBC
 				: AccessProvider.OleDb;
 		}

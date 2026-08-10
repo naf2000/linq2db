@@ -34,30 +34,32 @@ namespace Tests.UserTests
 		}
 
 		[Test]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void Test1([DataSources(TestProvName.AllInformix, TestProvName.AllClickHouse)] string context)
 		{
 			var harnessIds = new int[2];
 
-			using (var db = GetDataContext(context))
-				db.GetTable<Parent>()
-					.Where     (x => harnessIds.Contains(x.ParentID))
-					.SelectMany(x => x.Values)
-					.Set       (x => x.Value1, (long?)null)
-					.Update();
+			using var db = GetDataContext(context);
+			db.GetTable<Parent>()
+				.Where(x => harnessIds.Contains(x.ParentID))
+				.SelectMany(x => x.Values)
+				.Set(x => x.Value1, (long?)null)
+				.Update();
 		}
 
 		[Test]
+		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void Test2([DataSources(TestProvName.AllAccess, TestProvName.AllInformix, TestProvName.AllSybase, TestProvName.AllClickHouse)] string context)
 		{
 			var harnessIds = Array.Empty<int>();
 
-			using (var db = GetDataContext(context))
-				db.GetTable<Parent>()
-					.Where     (x => harnessIds.Contains(x.ParentID))
-					.SelectMany(x => x.Children)
-					.SelectMany(x => x.Children)
-					.Set       (x => x.ChildID, 10)
-					.Update();
+			using var db = GetDataContext(context);
+			db.GetTable<Parent>()
+				.Where(x => harnessIds.Contains(x.ParentID))
+				.SelectMany(x => x.Children)
+				.SelectMany(x => x.Children)
+				.Set(x => x.ChildID, 10)
+				.Update();
 		}
 	}
 }

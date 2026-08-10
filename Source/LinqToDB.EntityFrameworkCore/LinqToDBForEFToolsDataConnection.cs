@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -114,7 +115,7 @@ namespace LinqToDB.EntityFrameworkCore
 				return EntityType.Equals(other.EntityType) && Equals(Model, other.Model);
 			}
 
-			public override bool Equals(object? obj)
+			public override bool Equals([NotNullWhen(true)] object? obj)
 			{
 				if (ReferenceEquals(null, obj))
 				{
@@ -166,7 +167,7 @@ namespace LinqToDB.EntityFrameworkCore
 				return entity;
 
 			// Do not allow to store in ChangeTracker tables that has different name
-			if (eventData.TableName != _lastEntityType.GetTableName())
+			if (!string.Equals(eventData.TableName, _lastEntityType.GetTableName(), StringComparison.Ordinal))
 				return entity;
 
 			_stateManager ??= Context.GetService<IStateManager>();
@@ -193,9 +194,9 @@ namespace LinqToDB.EntityFrameworkCore
 
 			entry = retrieved ?? _stateManager.StartTrackingFromQuery(_lastEntityType, entity,
 #if !EF31 && !EF8
-				Snapshot.Empty);
+				in Snapshot.Empty);
 #else
-				ValueBuffer.Empty);
+				in ValueBuffer.Empty);
 #endif
 
 			return entry.Entity;
@@ -229,7 +230,7 @@ namespace LinqToDB.EntityFrameworkCore
 					Expression.Constant(key),
 					newArrayExpression), Expression.Constant(true));
 
-			if (properties.Any(p => !p.ClrType.IsValueType))
+			if (properties.Exists(p => !p.ClrType.IsValueType))
 			{
 				var checkExpression = properties
 					.Where(p => !p.ClrType.IsValueType)

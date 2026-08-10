@@ -62,7 +62,7 @@ namespace LinqToDB.Internal.Expressions
 
 			var columnReader = new ColumnReader(dataContext.MappingSchema, _type, _idx, Converter, slowMode);
 
-			if (slowMode && LinqToDB.Common.Configuration.OptimizeForSequentialAccess)
+			if (slowMode && dataContext.Options.LinqOptions.OptimizeForSequentialAccess)
 				return Convert(Call(Constant(columnReader), Methods.LinqToDB.ColumnReader.GetValueSequential, DataContextParam, _dataReaderParam, Call(_dataReaderParam, Methods.ADONet.IsDBNull, ExpressionInstances.Int32Array(_idx)), Call(Methods.LinqToDB.ColumnReader.RawValuePlaceholder)), _type);
 			else
 				return Convert(Call(Constant(columnReader), Methods.LinqToDB.ColumnReader.GetValue, DataContextParam, _dataReaderParam), _type);
@@ -255,7 +255,7 @@ namespace LinqToDB.Internal.Expressions
 					throw new LinqToDBConvertException(
 							$"Mapping of column '{name}' value failed, see inner exception for details", ex)
 					{
-						ColumnName = name
+						ColumnName = name,
 					};
 				}
 			}
@@ -326,7 +326,7 @@ namespace LinqToDB.Internal.Expressions
 					throw new LinqToDBConvertException(
 							$"Mapping of column '{name}' value failed, see inner exception for details", ex)
 					{
-						ColumnName = name
+						ColumnName = name,
 					};
 				}
 			}
@@ -353,7 +353,7 @@ namespace LinqToDB.Internal.Expressions
 
 		public ConvertFromDataReaderExpression MakeNullable()
 		{
-			if (!Type.IsNullableOrReferenceType())
+			if (!Type.IsNullableOrReferenceType)
 			{
 				var type = Type.AsNullable();
 				return new ConvertFromDataReaderExpression(type, _idx, Converter, DataContextParam, _dataReaderParam, true);

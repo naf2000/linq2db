@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using LinqToDB.DataProvider;
 using LinqToDB.Internal;
 using LinqToDB.Internal.Common;
 using LinqToDB.Internal.DataProvider;
@@ -64,7 +65,7 @@ namespace LinqToDB.Data
 							TraceLevel       = TraceLevel.Info,
 							MapperExpression = MapperExpression,
 							StartTime        = _startedOn,
-							ExecutionTime    = _stopwatch.Elapsed
+							ExecutionTime    = _stopwatch.Elapsed,
 						});
 					}
 				}
@@ -129,7 +130,7 @@ namespace LinqToDB.Data
 						MapperExpression = MapperExpression,
 						StartTime        = _startedOn,
 						ExecutionTime    = _stopwatch.Elapsed,
-						RecordsAffected  = RowsCount
+						RecordsAffected  = RowsCount,
 					});
 				}
 
@@ -150,7 +151,7 @@ namespace LinqToDB.Data
 						MapperExpression = MapperExpression,
 						StartTime        = _startedOn,
 						ExecutionTime    = _stopwatch.Elapsed,
-						RecordsAffected  = RowsCount
+						RecordsAffected  = RowsCount,
 					});
 				}
 
@@ -230,7 +231,12 @@ namespace LinqToDB.Data
 					var commands = new CommandWithParameters[cc];
 
 					var optimizeAndConvertAll = !continuousRun && !statement.IsParameterDependent;
-					// We can optimize and convert all queries at once, because they are not parameter dependent.
+					// Non-parameter-dependent, first-run queries may be optimized/converted in place (Modify
+					// mode) and their built commands cached/reused. Parameter-dependent / continuous-run
+					// queries must stay non-mutating (Transform mode) and rebuild per execution. NOTE: the
+					// convert pass itself now runs unconditionally before aliasing (below) regardless of this
+					// flag; the flag selects visitor mutability, command caching, and (via
+					// isAlreadyOptimizedAndConverted) whether the per-element build-time convert still runs.
 
 					var optimizeVisitor = sqlOptimizer.CreateOptimizerVisitor(optimizeAndConvertAll);
 					var convertVisitor  = sqlOptimizer.CreateConvertVisitor(optimizeAndConvertAll);
@@ -248,7 +254,19 @@ namespace LinqToDB.Data
 						isAlreadyOptimizedAndConverted : optimizeAndConvertAll,
 						parametersNormalizerFactory : dataConnection.DataProvider.GetQueryParameterNormalizer);
 
-					if (optimizeAndConvertAll)
+					// Optimize+convert the whole statement before aliasing, unconditionally. Any conversion
+					// that restructures the AST (e.g. IN->EXISTS clones its sub-query) must run before the
+					// aliasing pass: the alias context is keyed to the nodes it visits, so nodes created
+					// after aliasing carry SourceIDs it never recorded and the SQL builder can't resolve
+					// their aliases. Parameter-dependent queries previously deferred conversion into BuildSql
+					// (after aliasing) - that was the alias-corruption bug. Mirrors the remote runner, which
+					// already prepares-then-aliases. This upfront pass does not cover every localized
+					// refinement the per-element build-time convert applies (e.g. narrowing an InsertOrUpdate
+					// SET-value cast to the target column's DbDataType, or provider expression conversions
+					// like ClickHouse bitAnd); so parameter-dependent queries keep isAlreadyOptimizedAndConverted
+					// false (above) and re-run that convert in BuildSql. That is safe because their visitors are
+					// non-mutating (Transform mode), so the build-time pass produces new nodes without mutating
+					// the shared cached statement - it cannot reintroduce the aliasing race.
 					{
 						var nullability = NullabilityContext.GetContext(statement.SelectQuery);
 						statement = optimizationContext.OptimizeAndConvertAll(statement, nullability);
@@ -256,9 +274,14 @@ namespace LinqToDB.Data
 
 					// correct aliases if needed
 					var serviceProvider = ((IInfrastructure<IServiceProvider>)dataConnection.DataProvider).Instance;
-					AliasesHelper.PrepareQueryAndAliases(serviceProvider.GetRequiredService<IIdentifierService>(), statement, query.Aliases, out var aliases);
-
-					query.Aliases = aliases;
+					// Alias fresh every execution. Non-parameter-dependent queries reach this block only on the
+					// first execution, then cache their built commands (below) and short-circuit on subsequent
+					// runs, so they never re-alias. Parameter-dependent / continuous-run queries don't cache; they
+					// re-reach this point every execution and rebuild the statement via OptimizeAndConvertAll in
+					// Transform mode, producing fresh node identities. Fresh aliasing is deterministic for a given
+					// statement shape, so it is both stable across executions and identical to the remote rendering
+					// (which always aliases fresh server-side over a freshly deserialized statement).
+					AliasesHelper.PrepareQueryAndAliases(serviceProvider.GetRequiredService<IIdentifierService>(), statement, out var aliases);
 
 					for (var i = 0; i < cc; i++)
 					{
@@ -274,10 +297,6 @@ namespace LinqToDB.Data
 					if (optimizeAndConvertAll)
 					{
 						query.Context = commands;
-
-						// clear aliases, they are not needed after SQL generation.
-						//
-						query.Aliases = null;
 					}
 
 					query.IsContinuousRun = true;
@@ -322,23 +341,12 @@ namespace LinqToDB.Data
 
 			static DbParameter CreateParameter(DataConnection dataConnection, DbCommand command, SqlParameter parameter, SqlParameterValue parmValue)
 			{
-				var p          = command.CreateParameter();
-				var dbDataType = parmValue.DbDataType;
 				var paramValue = parameter.CorrectParameterValue(parmValue.ProviderValue);
+				var p          = dataConnection.DataProvider.CreateParameter(
+					dataConnection,
+					command,
+					new DataProviderParameterContext(parameter.Name!, parmValue.DbDataType, paramValue, isDbDataTypeExplicit: parmValue.IsDbDataTypeExplicit));
 
-				if (dbDataType.DataType == DataType.Undefined)
-				{
-					var newDataType = dbDataType.SystemType != typeof(object)
-							? dataConnection.MappingSchema.GetDbDataType(dbDataType.SystemType).DataType
-							: DataType.Undefined;
-
-					if (newDataType == DataType.Undefined && paramValue != null)
-						newDataType = dataConnection.MappingSchema.GetDbDataType(paramValue.GetType()).DataType;
-
-					dbDataType = dbDataType.WithDataType(newDataType);
-				}
-
-				dataConnection.DataProvider.SetParameter(dataConnection, p, parameter.Name!, dbDataType, paramValue);
 				// some providers (e.g. managed sybase provider) could change parameter name
 				// which breaks parameters rebind logic
 				parameter.Name = p.ParameterName;
@@ -379,7 +387,7 @@ namespace LinqToDB.Data
 				{
 					InitCommand(dataConnection, executionQuery, i);
 
-					if (i < executionQuery.PreparedQuery.Commands.Length - 1 && executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP"))
+					if (i < executionQuery.PreparedQuery.Commands.Length - 1 && executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP", StringComparison.Ordinal))
 					{
 						try
 						{
@@ -420,7 +428,7 @@ namespace LinqToDB.Data
 				{
 					InitCommand(dataConnection, executionQuery, i);
 
-					if (i < executionQuery.PreparedQuery.Commands.Length - 1 && executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP"))
+					if (i < executionQuery.PreparedQuery.Commands.Length - 1 && executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP", StringComparison.Ordinal))
 					{
 						try
 						{
@@ -539,7 +547,7 @@ namespace LinqToDB.Data
 
 				if (dataConnection.DataProvider.SqlProviderFlags.IsIdentityParameterRequired)
 				{
-					if (executionQuery.PreparedQuery.Statement.NeedsIdentity())
+					if (executionQuery.PreparedQuery.Statement.NeedsIdentity)
 					{
 						idParam = dataConnection.CurrentCommand!.CreateParameter();
 
@@ -710,7 +718,7 @@ namespace LinqToDB.Data
 				{
 					InitCommand(_dataConnection, _executionQuery, i);
 
-					if (i < _executionQuery.PreparedQuery.Commands.Length - 1 && _executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP"))
+					if (i < _executionQuery.PreparedQuery.Commands.Length - 1 && _executionQuery.PreparedQuery.Commands[i].Command.StartsWith("DROP", StringComparison.Ordinal))
 					{
 						try
 						{
@@ -740,7 +748,7 @@ namespace LinqToDB.Data
 
 				if (_dataConnection.DataProvider.SqlProviderFlags.IsIdentityParameterRequired)
 				{
-					if (_executionQuery!.PreparedQuery.Statement.NeedsIdentity())
+					if (_executionQuery!.PreparedQuery.Statement.NeedsIdentity)
 					{
 						idparam = _dataConnection.CurrentCommand!.CreateParameter();
 

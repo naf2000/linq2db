@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 
@@ -29,12 +28,14 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		SelectQuery?     _parentSelect;
 		SqlSetOperator?  _currentSetOperator;
+		bool             _isExpression;
 		SelectQuery?     _applySelect;
 		SelectQuery?     _inSubquery;
 		bool             _isInRecursiveCte;
 		CteClause?       _currentCteClause;
 		SelectQuery?     _updateQuery;
 		ISqlTableSource? _updateTable;
+		bool             _isColumnsOptimized;
 
 		readonly SqlQueryColumnNestingCorrector _columnNestingCorrector      = new();
 		readonly SqlQueryOrderByOptimizer       _orderByOptimizer            = new();
@@ -64,19 +65,21 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			}
 #endif
 
-			_providerFlags     = providerFlags;
-			_removeWeakJoins   = removeWeakJoins;
-			_dataOptions       = dataOptions;
-			_mappingSchema     = mappingSchema;
-			_evaluationContext = evaluationContext;
-			_root              = root;
-			_rootElement       = rootElement;
-			_dependencies      = dependencies;
-			_parentSelect      = default!;
-			_applySelect       = default!;
-			_inSubquery        = default!;
-			_updateQuery       = default!;
-			_updateTable       = default!;
+			_providerFlags      = providerFlags;
+			_removeWeakJoins    = removeWeakJoins;
+			_dataOptions        = dataOptions;
+			_mappingSchema      = mappingSchema;
+			_evaluationContext  = evaluationContext;
+			_root               = root;
+			_rootElement        = rootElement;
+			_dependencies       = dependencies;
+			_parentSelect       = default!;
+			_applySelect        = default!;
+			_inSubquery         = default!;
+			_updateQuery        = default!;
+			_updateTable        = default!;
+			_isExpression       = false;
+			_isColumnsOptimized = false;
 
 			// OUTER APPLY Queries usually may have wrong nesting in WHERE clause.
 			// Making it consistent in LINQ Translator is bad for performance and it is hard to implement task.
@@ -84,28 +87,43 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			//
 			if (CorrectColumnsNesting())
 			{
+				_isColumnsOptimized = false;
+				var isJoinsUnnested = false;
 				do
 				{
+					var continueOptimization = false;
+
 					ProcessElement(_root);
 
+					_root               = _columnOptimizerVisitor.OptimizeColumns(_root, _mappingSchema);
+
+					if (!_isColumnsOptimized)
+					{
+						continueOptimization = true;
+						_isColumnsOptimized = true;
+					}
+
+					continueOptimization = continueOptimization || _columnOptimizerVisitor.IsOptimized;
+
+					if (!isJoinsUnnested)
+					{
+						if (JoinsOptimizer.UnnestJoins(_root))
+							continueOptimization = true;
+						isJoinsUnnested = true;
+					}
+
 					_orderByOptimizer.OptimizeOrderBy(_root, _providerFlags, _columnNestingCorrector);
-					if (!_orderByOptimizer.IsOptimized)
+
+					continueOptimization = continueOptimization || _orderByOptimizer.IsOptimized;
+
+					if (!continueOptimization)
 						break;
 
 				} while (true);
 
-				if (removeWeakJoins)
-				{
-					// It means that we fully optimize query
-					_root = _columnOptimizerVisitor.OptimizeColumns(_root);
-
-					// do it always, ignore dataOptions.LinqOptions.OptimizeJoins
-					JoinsOptimizer.UnnestJoins(_root);
-
-					// convert remaining nested joins to subqueries
-					if (!_providerFlags.IsNestedJoinsSupported)
-						JoinsOptimizer.UndoNestedJoins(_root);
-				}
+				// convert remaining nested joins to subqueries
+				if (!_providerFlags.IsNestedJoinsSupported)
+					_root = JoinsOptimizer.UndoNestedJoins(_root, _columnNestingCorrector, _columnOptimizerVisitor, _mappingSchema);
 			}
 
 			return _root;
@@ -122,20 +140,22 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		{
 			base.Cleanup();
 
-			_providerFlags     = default!;
-			_dataOptions       = default!;
-			_mappingSchema     = default!;
-			_evaluationContext = default!;
-			_root              = default!;
-			_rootElement       = default!;
-			_dependencies      = default!;
-			_parentSelect      = default!;
-			_applySelect       = default!;
-			_version           = default;
-			_isInRecursiveCte  = false;
-			_currentCteClause  = null;
-			_updateQuery       = default;
-			_updateTable       = default;
+			_providerFlags      = default!;
+			_dataOptions        = default!;
+			_mappingSchema      = default!;
+			_evaluationContext  = default!;
+			_root               = default!;
+			_rootElement        = default!;
+			_dependencies       = default!;
+			_parentSelect       = default!;
+			_applySelect        = default!;
+			_isExpression       = false;
+			_version            = default;
+			_isInRecursiveCte   = false;
+			_currentCteClause   = null;
+			_updateQuery        = default;
+			_updateTable        = default;
+			_isColumnsOptimized = false;
 
 			_columnNestingCorrector.Cleanup();
 			_orderByOptimizer.Cleanup();
@@ -155,10 +175,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		{
 			var saveQuery = _applySelect;
 
-			if (element.JoinType == JoinType.CrossApply || element.JoinType == JoinType.OuterApply)
-				_applySelect = element.Table.Source as SelectQuery;
-			else
-				_applySelect = null;
+			_applySelect = element.JoinType switch
+			{
+				JoinType.CrossApply or JoinType.OuterApply => element.Table.Source as SelectQuery,
+				_ => null,
+			};
 
 			var newElement = base.VisitSqlJoinedTable(element);
 
@@ -169,6 +190,25 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		protected internal override IQueryElement VisitSqlQuery(SelectQuery selectQuery)
 		{
+			// simplify select query expression
+			if (_correcting == null
+				&& _isExpression
+				&& selectQuery is
+				{
+					HasNoTables: true,
+					IsSingleColumn: true,
+					HasSetOperators: false,
+					Where.SearchCondition.IsTrue: true,
+					HasGroupBy: false,
+					HasHaving: false,
+					Select.HasModifier: false,
+					DoNotRemove: false,
+					Select.Columns: [{ Expression: not SqlRowExpression and var columnExpression }, ..],
+				})
+			{
+				return Visit(columnExpression);
+			}
+
 			var saveSetOperatorCount  = selectQuery.HasSetOperators ? selectQuery.SetOperators.Count : 0;
 			var saveParent            = _parentSelect;
 
@@ -271,7 +311,16 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 #endif
 					CorrectEmptyInnerJoinsRecursive(selectQuery);
 
-					_expressionOptimizerVisitor.Optimize(_evaluationContext, NullabilityContext.GetContext(selectQuery), null, _dataOptions, _mappingSchema, selectQuery, visitQueries : true, reducePredicates: false);
+					_expressionOptimizerVisitor.Optimize(
+						_evaluationContext,
+						NullabilityContext.GetContext(selectQuery),
+						transformationInfo: null,
+						_dataOptions,
+						_mappingSchema,
+						selectQuery,
+						visitQueries: true,
+						reducePredicates: false
+					);
 				}
 
 				if (saveSetOperatorCount != (selectQuery.HasSetOperators ? selectQuery.SetOperators.Count : 0))
@@ -290,25 +339,31 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		protected internal override IQueryElement VisitSqlSetOperator(SqlSetOperator element)
 		{
 			var saveCurrent = _currentSetOperator;
+			var saveIsExpression = _isExpression;
 
 			_currentSetOperator = element;
+			_isExpression = false;
 
 			var newElement = base.VisitSqlSetOperator(element);
 
 			_currentSetOperator = saveCurrent;
+			_isExpression = saveIsExpression;
 
 			return newElement;
 		}
 
 		protected internal override IQueryElement VisitSqlTableSource(SqlTableSource element)
 		{
-			var saveCurrent        = _currentSetOperator;
+			var saveCurrent      = _currentSetOperator;
+			var saveIsExpression = _isExpression;
 
 			_currentSetOperator = null;
+			_isExpression = false;
 
 			var newElement = base.VisitSqlTableSource(element);
 
 			_currentSetOperator = saveCurrent;
+			_isExpression = saveIsExpression;
 
 			return newElement;
 		}
@@ -316,17 +371,26 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		protected internal override IQueryElement VisitInSubQueryPredicate(SqlPredicate.InSubQuery predicate)
 		{
 			var saveInsubquery = _inSubquery;
+			var saveIsExpression = _isExpression;
 
 			_inSubquery = predicate.SubQuery;
+			_isExpression = false;
+
 			var newNode = base.VisitInSubQueryPredicate(predicate);
 			_inSubquery = saveInsubquery;
+
+			_isExpression = saveIsExpression;
 
 			return newNode;
 		}
 
 		protected internal override IQueryElement VisitSqlOrderByClause(SqlOrderByClause element)
 		{
+			var saveIsExpression = _isExpression;
+
+			_isExpression = true;
 			var newElement = (SqlOrderByClause)base.VisitSqlOrderByClause(element);
+			_isExpression = saveIsExpression;
 
 			for (int i = newElement.Items.Count - 1; i >= 0; i--)
 			{
@@ -334,6 +398,17 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				if (QueryHelper.IsConstantFast(item.Expression))
 					newElement.Items.RemoveAt(i);
 			}
+
+			return newElement;
+		}
+
+		protected internal override IQueryElement VisitSqlGroupByClause(SqlGroupByClause element)
+		{
+			var saveIsExpression = _isExpression;
+
+			_isExpression = true;
+			var newElement = (SqlGroupByClause)base.VisitSqlGroupByClause(element);
+			_isExpression = saveIsExpression;
 
 			return newElement;
 		}
@@ -363,7 +438,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (sqlExpression is SelectQuery { GroupBy.IsEmpty: true } selectQuery)
 			{
 				var nullabilityContext = NullabilityContext.GetContext(selectQuery);
-				if (selectQuery.Select.Columns.All(c => QueryHelper.ContainsAggregationFunction(c.Expression) && !c.Expression.CanBeNullable(nullabilityContext)))
+				if (selectQuery.Select.Columns.TrueForAll(c => QueryHelper.ContainsAggregationFunction(c.Expression) && !c.Expression.CanBeNullable(nullabilityContext)))
 				{
 					return sqlExpression;
 				}
@@ -374,183 +449,370 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			return element;
 		}
 
+		/// <summary>
+		/// Dispatcher for the three independent set-operator flattening transformations. Each sub-
+		/// transformation is idempotent on its own, so we can OR their "modified" flags — the outer
+		/// <see cref="FinalizeAndValidateInternal"/> loop re-runs us until nothing changes.
+		/// </summary>
 		bool OptimizeUnions(SelectQuery selectQuery)
 		{
 			var isModified = false;
 
-			if (selectQuery.From.Tables.Count == 1 &&
-			    selectQuery.From.Tables[0].Source is SelectQuery { HasSetOperators: true } mainSubquery)
-			{
-				var isOk = true;
-
-				if (!selectQuery.HasSetOperators)
-				{
-					isOk = !selectQuery.HasOrderBy() && !selectQuery.HasWhere() && !selectQuery.HasGroupBy() && !selectQuery.Select.HasModifier;
-					if (isOk)
-					{
-						if (_currentSetOperator != null)
-						{
-							isOk = _currentSetOperator.Operation == mainSubquery.SetOperators[0].Operation;
-						}
-					}
-				}
-
-				if (isOk && mainSubquery.Select.Columns.Count == selectQuery.Select.Columns.Count)
-				{
-					var newIndexes = new Dictionary<ISqlExpression, int>(Utils
-						.ObjectReferenceEqualityComparer<ISqlExpression>
-						.Default);
-
-					for (var i = 0; i < selectQuery.Select.Columns.Count; i++)
-					{
-						var scol = selectQuery.Select.Columns[i];
-
-						if (!newIndexes.ContainsKey(scol.Expression))
-							newIndexes[scol.Expression] = i;
-					}
-
-					var operation = selectQuery.HasSetOperators ? selectQuery.SetOperators[0].Operation : mainSubquery.SetOperators[0].Operation;
-
-					if (mainSubquery.SetOperators.All(so => so.Operation == operation))
-					{
-						if (CheckSetColumns(newIndexes, mainSubquery, operation))
-						{
-							UpdateSetIndexes(newIndexes, mainSubquery, operation);
-							selectQuery.SetOperators.InsertRange(0, mainSubquery.SetOperators);
-							mainSubquery.SetOperators.Clear();
-
-							selectQuery.From.Tables[0].Source = mainSubquery;
-
-							for (var i = 0; i < selectQuery.Select.Columns.Count; i++)
-							{
-								var c = selectQuery.Select.Columns[i];
-								c.Expression = mainSubquery.Select.Columns[i];
-							}
-
-							isModified = true;
-						}
-					}
-				}
-			}
+			if (TryLiftSetOperatorsFromSoleFromSubquery(selectQuery))
+				isModified = true;
 
 			if (!selectQuery.HasSetOperators)
 				return isModified;
+
+			if (TryCoalescePeerSetOperators(selectQuery))
+				isModified = true;
+
+			if (TryLiftSetOperatorsFromOperandFromSubquery(selectQuery))
+				isModified = true;
+
+			return isModified;
+		}
+
+		/// <summary>
+		/// Pattern: <c>SELECT ... FROM (A op B op C) x</c> where the outer query is a thin projection
+		/// with no barrier clauses. Promotes the subquery's set operators into the outer query so
+		/// the extra wrapping select is eliminated.
+		/// <para>
+		/// Safety: requires (a) no barrier clauses (WHERE / GROUP BY / HAVING / modifiers) on the
+		/// outer, (b) no ORDER BY when the outer has no set operators of its own, (c) operator-
+		/// compatibility with the surrounding set context (<see cref="_currentSetOperator"/>), and
+		/// (d) all of the subquery's operators sharing a single operation. Associativity of
+		/// compatible set operations (<c>A op B op C</c>) guarantees that promoting the legs does
+		/// not change the result — the operator joining the last lifted leg with the outer's
+		/// existing first operator (if any) is <c>operation</c> by construction.
+		/// </para>
+		/// </summary>
+		bool TryLiftSetOperatorsFromSoleFromSubquery(SelectQuery selectQuery)
+		{
+			// A join on the sole FROM table references the subquery's columns; lifting the set
+			// operators here would orphan that reference (the hazard #5625 guards in IsMovingUpValid).
+			if (selectQuery.From.Tables is not [{ Source: SelectQuery { HasSetOperators: true } mainSubquery, HasJoins: false }])
+				return false;
+
+			if (HasSetOperatorBarrier(selectQuery))
+				return false;
+
+			// ORDER BY and enclosing set-operator compatibility only matter when the lifted legs
+			// become direct peers of the outer chain. If selectQuery already has its own set
+			// operators, the lifted legs are absorbed into that internal chain and the enclosing
+			// operator relationship is unchanged.
+			if (!selectQuery.HasSetOperators)
+			{
+				if (selectQuery.HasOrderBy)
+					return false;
+
+				if (_currentSetOperator != null
+					&& _currentSetOperator.Operation != mainSubquery.SetOperators[0].Operation)
+				{
+					return false;
+				}
+			}
+
+			var operation = selectQuery.HasSetOperators
+				? selectQuery.SetOperators[0].Operation
+				: mainSubquery.SetOperators[0].Operation;
+
+			// UnionAll can widen mainSubquery's legs by synthesising constant columns for outer
+			// positions that don't project a mainSubquery column (TryReorderSetColumns handles it
+			// and bails gracefully if a non-constant is missing). Other set operations need strict
+			// column alignment because every position is significant.
+			if (operation != SetOperation.UnionAll
+				&& mainSubquery.Select.Columns.Count != selectQuery.Select.Columns.Count)
+			{
+				return false;
+			}
+
+			if (!TryBuildOuterColumnIndexes(selectQuery.Select.Columns, out var newIndexes))
+				return false;
+
+			if (!mainSubquery.SetOperators.TrueForAll(so => so.Operation == operation))
+				return false;
+
+			if (!TryReorderSetColumns(newIndexes, mainSubquery, operation))
+				return false;
+
+			selectQuery.SetOperators.InsertRange(0, mainSubquery.SetOperators);
+			mainSubquery.SetOperators.Clear();
+
+			for (var i = 0; i < selectQuery.Select.Columns.Count; i++)
+			{
+				selectQuery.Select.Columns[i].Expression = mainSubquery.Select.Columns[i];
+			}
+
+			return true;
+		}
+
+		/// <summary>
+		/// Pattern: <c>A op (B op C)</c> where the right-hand operand itself has set operators
+		/// using the same operation. Flattens to <c>A op B op C</c>.
+		/// <para>
+		/// No barrier check is needed here because we do not collapse the operand's body — the
+		/// operand's <see cref="SelectQuery"/> (with any WHERE / GROUP BY etc.) remains as the
+		/// first leg of the flattened chain; only its trailing <see cref="SelectQuery.SetOperators"/>
+		/// are moved up as siblings.
+		/// </para>
+		/// </summary>
+		static bool TryCoalescePeerSetOperators(SelectQuery selectQuery)
+		{
+			var isModified = false;
 
 			for (var index = 0; index < selectQuery.SetOperators.Count; index++)
 			{
 				var setOperator = selectQuery.SetOperators[index];
 
-				if (setOperator.SelectQuery.From.Tables.Count == 1 &&
-				    setOperator.SelectQuery.From.Tables[0].Source is SelectQuery { HasSetOperators: true } subQuery)
-				{
-					if (subQuery.SetOperators.All(so => so.Operation == setOperator.Operation))
-					{
-						var allColumns = setOperator.Operation != SetOperation.UnionAll;
+				if (!setOperator.SelectQuery.HasSetOperators)
+					continue;
 
-						if (allColumns)
-						{
-							if (subQuery.Select.Columns.Count != selectQuery.Select.Columns.Count)
-								continue;
-						}
+				if (!setOperator.SelectQuery.SetOperators.TrueForAll(so => so.Operation == setOperator.Operation))
+					continue;
 
-						var newIndexes =
-							new Dictionary<ISqlExpression, int>(Utils.ObjectReferenceEqualityComparer<ISqlExpression>
-								.Default);
-
-						for (var i = 0; i < setOperator.SelectQuery.Select.Columns.Count; i++)
-						{
-							var scol = setOperator.SelectQuery.Select.Columns[i];
-
-							if (!newIndexes.ContainsKey(scol.Expression))
-								newIndexes[scol.Expression] = i;
-						}
-
-						if (!CheckSetColumns(newIndexes, subQuery, setOperator.Operation))
-							continue;
-
-						UpdateSetIndexes(newIndexes, subQuery, setOperator.Operation);
-
-						setOperator.Modify(subQuery);
-						selectQuery.SetOperators.InsertRange(index + 1, subQuery.SetOperators);
-						subQuery.SetOperators.Clear();
-						--index;
-
-						isModified = true;
-					}
-				}
+				selectQuery.SetOperators.InsertRange(index + 1, setOperator.SelectQuery.SetOperators);
+				setOperator.SelectQuery.SetOperators.Clear();
+				--index;
+				isModified = true;
 			}
 
 			return isModified;
 		}
 
-		static void UpdateSetIndexes(Dictionary<ISqlExpression, int> newIndexes, SelectQuery setQuery, SetOperation setOperation)
+		/// <summary>
+		/// Pattern: <c>A op (SELECT ... FROM (B op C) x)</c> — an operand is a thin projection over
+		/// a set-operation subquery. Lifts the inner set operators up to the outer chain, after
+		/// reordering their columns to match the operand's projection.
+		/// <para>
+		/// Safety: the operand's body must have no barrier clauses (otherwise dropping the wrapper
+		/// would change semantics), its sub-operators must all share a single operation matching
+		/// the surrounding operator, and for non-UnionAll operations the column widths must agree
+		/// (UnionAll can synthesise constants for missing columns; other operations cannot, because
+		/// every column is significant for INTERSECT/EXCEPT/UNION).
+		/// </para>
+		/// </summary>
+		static bool TryLiftSetOperatorsFromOperandFromSubquery(SelectQuery selectQuery)
 		{
-			if (setOperation == SetOperation.UnionAll)
+			var isModified = false;
+
+			for (var index = 0; index < selectQuery.SetOperators.Count; index++)
 			{
-				for (var index = 0; index < setQuery.Select.Columns.Count; index++)
+				var setOperator = selectQuery.SetOperators[index];
+
+				if (setOperator.SelectQuery.From.Tables is not [{ Source: SelectQuery { HasSetOperators: true } subQuery }])
+					continue;
+
+				if (HasSetOperatorBarrier(setOperator.SelectQuery))
+					continue;
+
+				if (!subQuery.SetOperators.TrueForAll(so => so.Operation == setOperator.Operation))
+					continue;
+
+				if (setOperator.Operation != SetOperation.UnionAll
+					&& subQuery.Select.Columns.Count != selectQuery.Select.Columns.Count)
 				{
-					var column = setQuery.Select.Columns[index];
-					if (!newIndexes.ContainsKey(column))
-					{
-						setQuery.Select.Columns.RemoveAt(index);
-
-						foreach (var op in setQuery.SetOperators)
-						{
-							if (index < op.SelectQuery.Select.Columns.Count)
-								op.SelectQuery.Select.Columns.RemoveAt(index);
-						}
-
-						--index;
-					}
-				}
-			}
-
-			foreach (var pair in newIndexes.OrderBy(x => x.Value))
-			{
-				var currentIndex = setQuery.Select.Columns.FindIndex(c => ReferenceEquals(c, pair.Key));
-				if (currentIndex < 0)
-				{
-					if (setOperation != SetOperation.UnionAll)
-						throw new InvalidOperationException();
-
-					foreach (var op in setQuery.SetOperators)
-					{
-						op.SelectQuery.Select.Columns.Insert(pair.Value, new SqlColumn(op.SelectQuery, pair.Key));
-					}
-
 					continue;
 				}
 
-				var newIndex = pair.Value;
-				if (currentIndex != newIndex)
-				{
-					var uc = setQuery.Select.Columns[currentIndex];
-					setQuery.Select.Columns.RemoveAt(currentIndex);
-					setQuery.Select.Select.Columns.Insert(newIndex, uc);
+				if (!TryBuildOuterColumnIndexes(setOperator.SelectQuery.Select.Columns, out var newIndexes))
+					continue;
 
-					// change indexes in SetOperators
-					foreach (var op in setQuery.SetOperators)
+				if (!TryReorderSetColumns(newIndexes, subQuery, setOperator.Operation))
+					continue;
+
+				setOperator.Modify(subQuery);
+				selectQuery.SetOperators.InsertRange(index + 1, subQuery.SetOperators);
+				subQuery.SetOperators.Clear();
+				--index;
+
+				isModified = true;
+			}
+
+			return isModified;
+		}
+
+		/// <summary>
+		/// Returns <see langword="true" /> when the query has clauses (WHERE, GROUP BY, HAVING, DISTINCT/TOP)
+		/// that apply to the entire result set and would break semantics if set operators
+		/// were flattened through it.
+		/// </summary>
+		static bool HasSetOperatorBarrier(SelectQuery query)
+		{
+			return query.HasWhere || query.HasGroupBy || query.HasHaving || query.Select.HasModifier;
+		}
+
+		/// <summary>
+		/// Builds a map from each outer column's <see cref="SqlColumn.Expression"/> to its position
+		/// in <paramref name="outerColumns"/>. Returns <see langword="false"/> (and a <see langword="null"/> map) when two
+		/// outer columns share the same underlying expression - flattening would silently collapse
+		/// them, so the caller must bail out instead.
+		/// </summary>
+		static bool TryBuildOuterColumnIndexes(
+			IReadOnlyList<SqlColumn> outerColumns,
+			[NotNullWhen(true)] out Dictionary<ISqlExpression, int>? indexes)
+		{
+			indexes = new Dictionary<ISqlExpression, int>(
+				Utils.ObjectReferenceEqualityComparer<ISqlExpression>.Default);
+
+			for (var i = 0; i < outerColumns.Count; i++)
+			{
+				if (!indexes.TryAdd(outerColumns[i].Expression, i))
+				{
+					indexes = null;
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		/// <summary>
+		/// Reorders (and, for <see cref="SetOperation.UnionAll"/>, trims/augments) the columns of
+		/// <paramref name="setQuery"/> and every one of its <see cref="SelectQuery.SetOperators"/>
+		/// legs so that column <c>i</c> corresponds to the expression whose target position is
+		/// <c>i</c> in <paramref name="newIndexes"/>. Returns <see langword="false"/> — leaving the query
+		/// untouched — when the requested layout cannot be realized:
+		/// <list type="bullet">
+		///   <item>a target expression is missing from <paramref name="setQuery"/> and the operation
+		///         forbids synthesis (non-UnionAll) or the expression is not a constant;</item>
+		///   <item>a leg has fewer columns than <paramref name="setQuery"/> for a non-UnionAll
+		///         operation (legs must be aligned).</item>
+		/// </list>
+		/// <para>
+		/// Runs in O(N + M·L) where N is the setQuery column count, M is the target column count,
+		/// and L is the number of set-operator legs — linear per column, no in-place shuffling.
+		/// </para>
+		/// </summary>
+		static bool TryReorderSetColumns(
+			Dictionary<ISqlExpression, int> newIndexes,
+			SelectQuery                     setQuery,
+			SetOperation                    setOperation)
+		{
+			var mainColumns = setQuery.Select.Columns;
+
+			// Index current setQuery columns by reference so we can locate each target expression
+			// in a single pass rather than an O(N) FindIndex per target.
+			var currentByRef = new Dictionary<ISqlExpression, int>(
+				mainColumns.Count,
+				Utils.ObjectReferenceEqualityComparer<ISqlExpression>.Default);
+
+			for (var i = 0; i < mainColumns.Count; i++)
+				currentByRef[mainColumns[i]] = i;
+
+			var targetSize = newIndexes.Count;
+			var newMain    = new SqlColumn[targetSize];
+			var legs       = setQuery.SetOperators;
+			var newLegs    = legs.Count == 0 ? null : new SqlColumn[legs.Count][];
+
+			if (newLegs != null)
+			{
+				for (var li = 0; li < legs.Count; li++)
+					newLegs[li] = new SqlColumn[targetSize];
+			}
+
+			// Track which original positions got consumed so we can preserve any unreferenced
+			// columns for non-UnionAll operations (the original code left them in place; dropping
+			// them would change the leg width and break INTERSECT/EXCEPT semantics).
+			var consumedOld = mainColumns.Count == 0 ? null : new bool[mainColumns.Count];
+
+			foreach (var pair in newIndexes)
+			{
+				var targetIdx = pair.Value;
+
+				if (currentByRef.TryGetValue(pair.Key, out var oldIdx))
+				{
+					newMain[targetIdx]   = mainColumns[oldIdx];
+					consumedOld![oldIdx] = true;
+
+					if (newLegs != null)
 					{
-						var column = op.SelectQuery.Select.Columns[currentIndex];
-						op.SelectQuery.Select.Columns.RemoveAt(currentIndex);
-						op.SelectQuery.Select.Columns.Insert(newIndex, column);
+						for (var li = 0; li < legs.Count; li++)
+						{
+							var legCols = legs[li].SelectQuery.Select.Columns;
+							if (oldIdx >= legCols.Count)
+							{
+								// Mis-aligned leg. UnionAll with a short leg is handled like a
+								// missing column (original behaviour); any other operation is a
+								// hard error and we must leave the query unchanged.
+								if (setOperation != SetOperation.UnionAll)
+									return false;
+
+								newLegs[li][targetIdx] = new SqlColumn(legs[li].SelectQuery, pair.Key);
+							}
+							else
+							{
+								newLegs[li][targetIdx] = legCols[oldIdx];
+							}
+						}
+					}
+				}
+				else
+				{
+					// Missing column: only synthesizable for UnionAll with a stateless (constant)
+					// expression. IsConstantFast guarantees no parent-dependent state, so the same
+					// ISqlExpression instance can be shared across the synthesised SqlColumns.
+					if (setOperation != SetOperation.UnionAll || !QueryHelper.IsConstantFast(pair.Key))
+						return false;
+
+					newMain[targetIdx] = new SqlColumn(setQuery, pair.Key);
+
+					if (newLegs != null)
+					{
+						for (var li = 0; li < legs.Count; li++)
+							newLegs[li][targetIdx] = new SqlColumn(legs[li].SelectQuery, pair.Key);
 					}
 				}
 			}
-		}
 
-		static bool CheckSetColumns(Dictionary<ISqlExpression, int> newIndexes, SelectQuery setQuery, SetOperation setOperation)
-		{
-			foreach (var pair in newIndexes.OrderBy(x => x.Value))
+			// Commit: replace column lists. For UnionAll any unreferenced original columns are
+			// dropped (intentional — callers rely on this to prune projections). For other
+			// operations we append them to keep the leg width invariant.
+			List<SqlColumn>?       preservedMain = null;
+			List<SqlColumn>[]?     preservedLegs = null;
+
+			if (setOperation != SetOperation.UnionAll && consumedOld != null)
 			{
-				var currentIndex = setQuery.Select.Columns.FindIndex(c => ReferenceEquals(c, pair.Key));
-				if (currentIndex < 0)
+				for (var i = 0; i < consumedOld.Length; i++)
 				{
-					if (setOperation != SetOperation.UnionAll)
-						return false;
+					if (consumedOld[i])
+						continue;
 
-					if (!QueryHelper.IsConstantFast(pair.Key))
-						return false;
+					preservedMain ??= new List<SqlColumn>();
+					preservedMain.Add(mainColumns[i]);
+
+					if (newLegs != null)
+					{
+						preservedLegs ??= new List<SqlColumn>[legs.Count];
+						for (var li = 0; li < legs.Count; li++)
+						{
+							var legCols = legs[li].SelectQuery.Select.Columns;
+							if (i >= legCols.Count)
+								return false;
+
+							preservedLegs[li] ??= new List<SqlColumn>();
+							preservedLegs[li].Add(legCols[i]);
+						}
+					}
+				}
+			}
+
+			mainColumns.Clear();
+			for (var i = 0; i < targetSize; i++)
+				mainColumns.Add(newMain[i]);
+			if (preservedMain != null)
+				mainColumns.AddRange(preservedMain);
+
+			if (newLegs != null)
+			{
+				for (var li = 0; li < legs.Count; li++)
+				{
+					var legCols = legs[li].SelectQuery.Select.Columns;
+					legCols.Clear();
+					for (var i = 0; i < targetSize; i++)
+						legCols.Add(newLegs[li][i]);
+					if (preservedLegs?[li] != null)
+						legCols.AddRange(preservedLegs[li]);
 				}
 			}
 
@@ -578,7 +840,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		static bool IsGroupingQueryCanBeOptimized(SelectQuery selectQuery)
 		{
-			if (selectQuery.HasHaving())
+			if (selectQuery.HasHaving)
 				return false;
 
 			if (selectQuery.GroupBy.GroupingType != GroupingType.Default)
@@ -587,13 +849,13 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (QueryHelper.ContainsAggregationOrWindowFunction(selectQuery.Select))
 				return false;
 
-			if (selectQuery.HasWhere() && QueryHelper.ContainsAggregationOrWindowFunction(selectQuery.Where.SearchCondition))
+			if (selectQuery.HasWhere && QueryHelper.ContainsAggregationOrWindowFunction(selectQuery.Where.SearchCondition))
 				return false;
 
-			if (selectQuery.HasOrderBy() && QueryHelper.ContainsAggregationOrWindowFunction(selectQuery.OrderBy))
+			if (selectQuery.HasOrderBy && QueryHelper.ContainsAggregationOrWindowFunction(selectQuery.OrderBy))
 				return false;
 
-			if (selectQuery.GroupBy.Items.Any(i => i is SqlGroupingSet))
+			if (selectQuery.GroupBy.Items.Exists(i => i is SqlGroupingSet))
 				return false;
 
 			return true;
@@ -605,7 +867,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				return false;
 
 			var expressionsSet = new HashSet<ISqlExpression>(expressions);
-			
+
 			foreach (var key in keys)
 			{
 				var foundUnique = true;
@@ -643,7 +905,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		{
 			var isModified = false;
 
-			if (selectQuery.HasGroupBy())
+			if (selectQuery.HasGroupBy)
 			{
 				// Remove constants.
 				//
@@ -660,13 +922,13 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				selectQuery.GroupBy.Items.RemoveDuplicates(item => item);
 			}
 
-			if (selectQuery.HasGroupBy())
+			if (selectQuery.HasGroupBy)
 			{
 				// Check if we can remove GROUP BY entirely when there are no aggregations
 				if (IsGroupingQueryCanBeOptimized(selectQuery))
 				{
 					// Check if query is limited to one record
-					if (IsLimitedToOneRecord(selectQuery))
+					if (QueryHelper.IsLimitedToOneRecord(selectQuery))
 					{
 						selectQuery.GroupBy.Items.Clear();
 						isModified = true;
@@ -688,10 +950,10 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						}
 					}
 
-					if (selectQuery.HasGroupBy())
+					if (selectQuery.HasGroupBy)
 					{
 						var transformToDistinct = selectQuery.GroupBy.Items.Count == selectQuery.Select.Columns.Count
-						                          && selectQuery.GroupBy.Items.All(gi => selectQuery.Select.Columns.Any(c => c.Expression.Equals(gi)));
+							&& selectQuery.GroupBy.Items.TrueForAll(gi => selectQuery.Select.Columns.Exists(c => c.Expression.Equals(gi)));
 
 						if (transformToDistinct)
 						{
@@ -713,7 +975,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		bool CorrectColumns(SelectQuery selectQuery)
 		{
 			var isModified = false;
-			if (selectQuery.HasGroupBy() && selectQuery.Select.Columns.Count == 0)
+			if (selectQuery.HasGroupBy && selectQuery.Select.Columns.Count == 0)
 			{
 				isModified = true;
 				foreach (var item in selectQuery.GroupBy.Items)
@@ -744,21 +1006,21 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			if (join.JoinType == JoinType.Left)
 			{
-				if (join.Condition.IsFalse())
+				if (join.Condition.IsFalse)
 					return true;
 			}
 
 			if (join.JoinType is JoinType.Left or JoinType.OuterApply)
 			{
-				if ((join.Cardinality & SourceCardinality.One) != 0)
+				if (join.Cardinality.HasFlag(SourceCardinality.One))
 					return true;
 
 				if (join.Table.Source is SelectQuery joinQuery)
 				{
-					if (joinQuery.Where.SearchCondition.IsFalse())
+					if (joinQuery.Where.SearchCondition.IsFalse)
 						return true;
 
-					if (IsLimitedToOneRecord(joinQuery))
+					if (QueryHelper.IsLimitedToOneRecord(joinQuery))
 						return true;
 				}
 			}
@@ -812,14 +1074,14 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				{
 					var join = table.Joins[i];
 
-					if (join.Table.Source is SelectQuery subQuery && (join.JoinType is JoinType.Left or JoinType.OuterApply))
+					if (join is { Table.Source: SelectQuery subQuery, JoinType: JoinType.Left or JoinType.OuterApply })
 					{
-						var canRemoveEmptyJoin = false;
-
-						if (join.JoinType == JoinType.Left && join.Condition.IsFalse())
-							canRemoveEmptyJoin = true;
-						else if (join.JoinType == JoinType.OuterApply && subQuery.Where.SearchCondition.IsFalse())
-							canRemoveEmptyJoin = true;
+						var canRemoveEmptyJoin = join switch
+						{
+							{ JoinType: JoinType.Left, Condition.IsFalse: true } => true,
+							{ JoinType: JoinType.OuterApply } when subQuery.Where.SearchCondition.IsFalse => true,
+							_ => false,
+						};
 
 						if (canRemoveEmptyJoin)
 						{
@@ -832,7 +1094,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 								{
 									var dbType = QueryHelper.GetDbDataType(column.Expression, _mappingSchema);
 									var type   = dbType.SystemType;
-									if (!type.IsNullableOrReferenceType())
+									if (!type.IsNullableOrReferenceType)
 										type = type.AsNullable();
 									nullValue = new SqlValue(dbType.WithSystemType(type), null);
 								}
@@ -850,20 +1112,6 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			return isModified;
 		}
 
-		static bool IsLimitedToOneRecord(SelectQuery query)
-		{
-			if (query.Select.TakeValue is SqlValue { Value: 1 })
-				return true;
-
-			if (!query.HasGroupBy() && query.Select.Columns.Count > 0 && query.Select.Columns.All(c => QueryHelper.ContainsAggregationFunction(c.Expression)))
-				return true;
-
-			if (query.From.Tables.Count == 1 && query.From.Tables[0].Source is SelectQuery subQuery)
-				return IsLimitedToOneRecord(subQuery);
-
-			return false;
-		}
-
 		static bool IsComplexQuery(SelectQuery query, bool ignoreGroupBy)
 		{
 			if (query.From.Tables.Count != 1)
@@ -871,7 +1119,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				return true;
 			}
 
-			if (!ignoreGroupBy && query.HasGroupBy())
+			if (!ignoreGroupBy && query.HasGroupBy)
 			{
 				return false;
 			}
@@ -971,7 +1219,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						var bExpr = keyB[j];
 
 						// Search equality pair either direction
-						if (equalityPairs.Any(ep => (SameExpr(ep.Left, aExpr) && SameExpr(ep.Right, bExpr)) ||
+						if (equalityPairs.Exists(ep => (SameExpr(ep.Left, aExpr) && SameExpr(ep.Right, bExpr)) ||
 													(SameExpr(ep.Left, bExpr) && SameExpr(ep.Right, aExpr))))
 						{
 							found = true;
@@ -1006,19 +1254,23 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (!selectQuery.Select.IsDistinct || !selectQuery.Select.OptimizeDistinct)
 				return false;
 
+			// DISTINCT ON is never "redundant": removing it changes which row survives per ON key. Leave it intact.
+			if (selectQuery.Select.IsDistinctOn)
+				return false;
+
 			if (IsComplexQuery(selectQuery, false))
 				return false;
 
-			if (IsLimitedToOneRecord(selectQuery))
+			if (QueryHelper.IsLimitedToOneRecord(selectQuery))
 			{
 				// we can simplify query if we take only one record
 				selectQuery.Select.IsDistinct = false;
 				return true;
 			}
 
-			if (selectQuery.HasGroupBy())
+			if (selectQuery.HasGroupBy)
 			{
-				if (selectQuery.GroupBy.Items.All(gi => selectQuery.Select.Columns.Any(c => c.Expression.Equals(gi))))
+				if (selectQuery.GroupBy.Items.TrueForAll(gi => selectQuery.Select.Columns.Exists(c => c.Expression.Equals(gi))))
 				{
 					selectQuery.GroupBy.Items.Clear();
 					return true;
@@ -1031,7 +1283,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			QueryHelper.CollectUniqueKeys(selectQuery, includeDistinctAndGrouping: false, keys);
 			QueryHelper.CollectUniqueKeys(table,       keys);
-		
+
 			if (ContainsUniqueKey(selectQuery.Select.Columns.Select(static c => c.Expression), keys))
 			{
 				// We have found that distinct columns has unique key, so we can remove distinct
@@ -1044,11 +1296,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		static void ApplySubsequentOrder(SelectQuery mainQuery, SelectQuery subQuery)
 		{
-			if (subQuery.HasOrderBy())
+			if (subQuery.HasOrderBy)
 			{
 				foreach (var item in subQuery.OrderBy.Items)
 				{
-					mainQuery.OrderBy.Expr(item.Expression, item.IsDescending, item.IsPositioned);
+					mainQuery.OrderBy.Expr(item.Expression, item.IsDescending, item.IsPositioned, item.NullsPosition);
 				}
 			}
 		}
@@ -1094,11 +1346,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				var sql   = (SelectQuery)joinSource.Source;
 
-				var isAgg = sql.Select.Columns.Any(static c => QueryHelper.IsAggregationOrWindowExpression(c.Expression));
+				var isAgg = sql.Select.Columns.Exists(static c => QueryHelper.IsAggregationOrWindowExpression(c.Expression));
 
 				var isApplySupported = _providerFlags.IsApplyJoinSupported;
 
-				if (sql.Select.HasModifier || sql.HasGroupBy())
+				if (sql.Select.HasModifier || sql.HasGroupBy)
 				{
 					if (isApplySupported)
 						return optimized;
@@ -1157,7 +1409,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						}
 						else
 						{
-							if (!sql.Select.Columns.All(c => found.Contains(c.Expression)))
+							if (!sql.Select.Columns.TrueForAll(c => found.Contains(c.Expression)))
 								return optimized;
 						}
 					}
@@ -1169,7 +1421,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 					var orderByItems = sql.OrderBy.Items.ToList();
 
-					if (!sql.HasOrderBy())
+					if (!sql.HasOrderBy)
 					{
 						if (partitionBy != null)
 						{
@@ -1186,10 +1438,10 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						}
 					}
 
-					var orderItems = orderByItems.Select(o => new SqlWindowOrderItem(o.Expression, o.IsDescending, Sql.NullsPosition.None));
+					var orderItems = orderByItems.Select(o => new SqlWindowOrderItem(o.Expression, o.IsDescending, o.NullsPosition));
 
 					var longType = _mappingSchema.GetDbDataType(typeof(long));
-					rnExpression = new SqlExtendedFunction(longType, "ROW_NUMBER", [], [], partitionBy : partitionBy, orderBy : orderItems);
+					rnExpression = new SqlExtendedFunction(longType, "ROW_NUMBER", [], [], partitionBy: partitionBy, orderBy: orderItems);
 				}
 
 				var whereToIgnore = new List<IQueryElement> { sql.Where, sql.Select };
@@ -1235,7 +1487,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 								}
 							}
 
-							if (sql.HasGroupBy())
+							if (sql.HasGroupBy)
 							{
 								// we can only optimize SqlPredicate.ExprExpr
 								if (predicate is not SqlPredicate.ExprExpr expExpr)
@@ -1244,7 +1496,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 								}
 
 								// check that used key in grouping
-								if (!sql.GroupBy.Items.Any(gi => QueryHelper.SameWithoutNullablity(gi, expExpr.Expr1) || QueryHelper.SameWithoutNullablity(gi, expExpr.Expr2)))
+								if (!sql.GroupBy.Items.Exists(gi => QueryHelper.SameWithoutNullablity(gi, expExpr.Expr1) || QueryHelper.SameWithoutNullablity(gi, expExpr.Expr2)))
 								{
 									return optimized;
 								}
@@ -1263,7 +1515,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 								}
 
 								// check that used key in distinct
-								if (!sql.Select.Columns.Any(c => QueryHelper.SameWithoutNullablity(c.Expression, expExpr.Expr1) || QueryHelper.SameWithoutNullablity(c.Expression, expExpr.Expr2)))
+								if (!sql.Select.Columns.Exists(c => QueryHelper.SameWithoutNullablity(c.Expression, expExpr.Expr1) || QueryHelper.SameWithoutNullablity(c.Expression, expExpr.Expr2)))
 								{
 									return optimized;
 								}
@@ -1316,7 +1568,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						else
 							searchCondition.Add(new SqlPredicate.ExprExpr(rnColumn, SqlPredicate.Operator.LessOrEqual, takeValue, null));
 					}
-					else if (sql.Select.IsDistinct)
+					else if (sql.Select.IsDistinct && !sql.Select.IsDistinctOn)
 					{
 						sql.Select.IsDistinct = false;
 						searchCondition.Add(new SqlPredicate.ExprExpr(rnColumn, SqlPredicate.Operator.Equal, new SqlValue(1), null));
@@ -1324,6 +1576,29 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 
 				var toCheck = QueryHelper.EnumerateAccessibleSources(sql).ToList();
+
+				// Hoist correlated SELECT projections to the outer query. A column whose expression references
+				// only outer sources (e.g. a group aggregate projected through a `.First()` apply body) cannot
+				// remain in the apply body once it becomes a plain join - it would reference a sibling derived
+				// table out of scope. Redirect every reference to such a column to its underlying outer expression
+				// and drop the column, mirroring the column inlining done in OptimizeJoinSubQueries. Sound only for
+				// CrossApply (-> INNER JOIN): the joined row exists only when matched, so the hoisted outer value
+				// is always correct. OuterApply/Full/Right (-> LEFT/FULL/RIGHT JOIN) must keep the projection NULL
+				// when there is no matching row, so they are left untouched.
+				if (joinTable.JoinType == JoinType.CrossApply)
+				{
+					for (var hi = sql.Select.Columns.Count - 1; hi >= 0; hi--)
+					{
+						var hoistColumn = sql.Select.Columns[hi];
+
+						if (QueryHelper.IsDependsOnOuterSources(hoistColumn.Expression, currentSources: toCheck)
+							&& !QueryHelper.IsDependsOnSources(hoistColumn.Expression, toCheck))
+						{
+							NotifyReplaced(hoistColumn.Expression, hoistColumn);
+							sql.Select.Columns.RemoveAt(hi);
+						}
+					}
+				}
 
 				for (int i = 0; i < searchCondition.Count; i++)
 				{
@@ -1347,7 +1622,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		bool IsColumnExpressionAllowedToMoveUp(SelectQuery parentQuery, NullabilityContext nullability, SqlColumn column, ISqlExpression columnExpression, bool ignoreWhere, bool inGrouping)
 		{
-			if (columnExpression.ElementType is QueryElementType.Column or QueryElementType.SqlRawSqlTable or QueryElementType.SqlField or QueryElementType.SqlValue or QueryElementType.SqlParameter)
+			if (columnExpression.ElementType is QueryElementType.Column or QueryElementType.SqlRawSqlTable or QueryElementType.SqlField or QueryElementType.SqlCteTableField or QueryElementType.SqlValue or QueryElementType.SqlParameter)
 			{
 				return true;
 			}
@@ -1368,6 +1643,31 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				if (QueryHelper.IsConstantFast(binary.Expr2))
 				{
 					return IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, binary.Expr1, ignoreWhere, inGrouping);
+				}
+			}
+			else if (underlying is SqlConcatExpression concat)
+			{
+				// All-but-one operands constant — recurse on the unique non-constant.
+				// Covers `"prefix-" || col || "-suffix"`-style formatting concats with N >= 2 operands.
+				ISqlExpression? nonConstant = null;
+				var             multipleNonConstants = false;
+				foreach (var expr in concat.Expressions)
+				{
+					if (!QueryHelper.IsConstantFast(expr))
+					{
+						if (nonConstant != null)
+						{
+							multipleNonConstants = true;
+							break;
+						}
+
+						nonConstant = expr;
+					}
+				}
+
+				if (!multipleNonConstants && nonConstant != null)
+				{
+					return IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, nonConstant, ignoreWhere, inGrouping);
 				}
 			}
 			else if (underlying is SqlCastExpression castExpression)
@@ -1411,33 +1711,29 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			if (subQuery.HasSetOperators)
 			{
-				var newIndexes = new Dictionary<ISqlExpression, int>(Utils.ObjectReferenceEqualityComparer<ISqlExpression>.Default);
+				Dictionary<ISqlExpression, int>? newIndexes;
 
 				if (parentQuery.Select.Columns.Count == 0)
 				{
-					for (var i = 0; i < subQuery.Select.Columns.Count; i++)
-					{
-						var scol = subQuery.Select.Columns[i];
-						newIndexes[scol] = i;
-					}
-				}
-				else
-				{
-					for (var i = 0; i < parentQuery.Select.Columns.Count; i++)
-					{
-						var scol = parentQuery.Select.Columns[i];
+					// No projection on the parent — align the set-operator layout to the subquery's
+					// existing column order. Column identity is SqlColumn references, so we use them
+					// directly as keys.
+					newIndexes = new Dictionary<ISqlExpression, int>(
+						subQuery.Select.Columns.Count,
+						Utils.ObjectReferenceEqualityComparer<ISqlExpression>.Default);
 
-						if (!newIndexes.ContainsKey(scol.Expression))
-							newIndexes[scol.Expression] = i;
-					}
+					for (var i = 0; i < subQuery.Select.Columns.Count; i++)
+						newIndexes[subQuery.Select.Columns[i]] = i;
+				}
+				else if (!TryBuildOuterColumnIndexes(parentQuery.Select.Columns, out newIndexes))
+				{
+					return false;
 				}
 
 				var operation = subQuery.SetOperators[0].Operation;
 
-				if (!CheckSetColumns(newIndexes, subQuery, operation))
+				if (!TryReorderSetColumns(newIndexes, subQuery, operation))
 					return false;
-
-				UpdateSetIndexes(newIndexes, subQuery, operation);
 
 				parentQuery.SetOperators.InsertRange(0, subQuery.SetOperators);
 				subQuery.SetOperators.Clear();
@@ -1445,7 +1741,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			parentQuery.QueryName ??= subQuery.QueryName;
 
-			if (subQuery.HasGroupBy())
+			if (subQuery.HasGroupBy)
 			{
 				parentQuery.GroupBy.Items.InsertRange(0, subQuery.GroupBy.Items);
 				parentQuery.GroupBy.GroupingType = subQuery.GroupBy.GroupingType;
@@ -1458,12 +1754,12 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				parentQuery.Where.SearchCondition.Predicates.Clear();
 			}
 
-			if (subQuery.HasWhere())
+			if (subQuery.HasWhere)
 			{
 				parentQuery.Where.SearchCondition = QueryHelper.MergeConditions(parentQuery.Where.SearchCondition, subQuery.Where.SearchCondition);
 			}
 
-			if (subQuery.HasHaving())
+			if (subQuery.HasHaving)
 			{
 				parentQuery.Having.SearchCondition = QueryHelper.MergeConditions(parentQuery.Having.SearchCondition, subQuery.Having.SearchCondition);
 			}
@@ -1472,6 +1768,9 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				parentQuery.Select.OptimizeDistinct = parentQuery.Select.OptimizeDistinct || subQuery.Select.OptimizeDistinct;
 				parentQuery.Select.IsDistinct       = true;
+				// carry DISTINCT ON keys with the modifier so a flattened parent keeps the correct distinct semantics
+				if (subQuery.Select.IsDistinctOn)
+					parentQuery.Select.DistinctOn = subQuery.Select.DistinctOn;
 			}
 
 			if (subQuery.Select.TakeValue != null)
@@ -1538,7 +1837,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			ApplySubQueryExtensions(parentQuery, subQuery);
 
-			if (subQuery.HasOrderBy())
+			if (subQuery.HasOrderBy)
 			{
 				ApplySubsequentOrder(parentQuery, subQuery);
 			}
@@ -1546,17 +1845,106 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			return true;
 		}
 
+		bool IsValidForOrderBy(SelectQuery parentQuery, SelectQuery subQuery, bool forMovingToColumn)
+		{
+			if (parentQuery.OrderBy.IsEmpty)
+			{
+				return true;
+			}
+
+			if (!_providerFlags.IsOrderBySubQuerySupported)
+			{
+				if (parentQuery.OrderBy.AnyElement(oi =>
+				    {
+					    if (oi is SqlColumn column && column.Parent == subQuery)
+					    {
+						    if (forMovingToColumn)
+							    return true;
+						    return column.Expression.AnyElement(ce => ce is SelectQuery);
+					    }
+
+					    return false;
+				    }))
+				{
+					return false;
+				}
+			}
+
+			if (!_providerFlags.IsOrderByAggregateFunctionSupported)
+			{
+
+				if (parentQuery.OrderBy.AnyElement(e =>
+				    {
+					    if (e is SqlColumn column && column.Parent == subQuery)
+					    {
+						    return column.Expression.AnyElement(QueryHelper.IsAggregationFunction);
+					    }
+
+					    return false;
+				    }))
+				{
+					return false;
+				}
+			}
+
+			if (!_providerFlags.IsOrderByAggregateSubquerySupported)
+			{
+				if (parentQuery.OrderBy.AnyElement(e =>
+				    {
+					    if (e is SqlColumn column && column.Parent == subQuery)
+					    {
+						    if (forMovingToColumn)
+						    {
+							    return IsAggregationQuery(subQuery);
+						    }
+						    else
+						    {
+							    return column.Expression.AnyElement(ce =>
+							    {
+								    if (ce is SelectQuery sq)
+								    {
+									    return IsAggregationQuery(sq);
+								    }
+
+								    return false;
+							    });
+						    }
+					    }
+
+					    return false;
+				    }))
+				{
+					return false;
+				}
+			}
+
+			return true;
+
+			static bool IsAggregationQuery(SelectQuery query)
+			{
+				if (!query.GroupBy.IsEmpty)
+					return true;
+				if (query.Select.Columns.Exists(c => QueryHelper.ContainsAggregationOrWindowFunction(c.Expression)))
+					return true;
+				return false;
+			}
+		}
+
 		bool IsMovingUpValid(SelectQuery parentQuery, SqlTableSource tableSource, SelectQuery subQuery, out HashSet<ISqlPredicate>? havingDetected)
 		{
 			havingDetected = null;
 
-			if (subQuery.IsSimple() && parentQuery.IsSimple())
+			// Fast path: both queries are trivial SELECTs over a single table with no clauses,
+			// no set operators, no query-name pinning, and every outer column is a straight
+			// SqlColumn — nothing further can force a rejection, so merging is always safe.
+			// IsSimple already covers HasOrderBy/HasSetOperators and the single-table shape
+			// (see SelectQueryExtensions.IsSimpleOrSet).
+			if (subQuery.IsSimple
+				&& parentQuery.IsSimple
+				&& subQuery.QueryName == null
+				&& parentQuery.Select.Columns.TrueForAll(c => c.Expression is SqlColumn))
 			{
-				if (parentQuery.Select.Columns.All(c => c.Expression is SqlColumn))
-				{
-					// shortcut
-					return true;
-				}
+				return true;
 			}
 
 			if (subQuery.From.Tables.Count > 1)
@@ -1574,47 +1962,36 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			// Trying to do not mix query hints
 			if (subQuery.SqlQueryExtensions?.Count > 0)
 			{
-				if (tableSource.Joins.Count > 0 || parentQuery.From.Tables.Count > 1)
+				if (tableSource.HasJoins || parentQuery.From.Tables.Count > 1)
 					return false;
 			}
 
-			if (parentQuery.HasOrderBy() && !_providerFlags.IsOrderByAggregateFunctionSupported)
+			if (!IsValidForOrderBy(parentQuery, subQuery, false))
 			{
-				if (parentQuery.OrderBy.Items.Select(o => o.Expression).Any(e =>
-				    {
-					    if (QueryHelper.UnwrapNullablity(e) is SqlColumn column)
-					    {
-							if (column.Parent == subQuery)
-								return QueryHelper.ContainsAggregationFunction(column.Expression);
-					    }
-
-					    return false;
-				    }))
-				{
-					// not allowed to move to parent if it has aggregates
-					return false;
-				}
+				return false;
 			}
 
-			if (parentQuery.HasGroupBy())
+			if (parentQuery.HasGroupBy)
 			{
-				if (subQuery.HasGroupBy())
+				if (subQuery.HasGroupBy)
 					return false;
 
 				if (parentQuery.Select.Columns.Count == 0)
 					return false;
 
 				// Check that all grouping columns are simple
-				if (parentQuery.GroupBy.EnumItems().Any(gi =>
+				if (
+					parentQuery.GroupBy.EnumItems().Any(gi =>
 				    {
 					    if (gi is not SqlColumn sc)
 						    return true;
 
-					    if (QueryHelper.UnwrapNullablity(sc.Expression) is not (SqlColumn or SqlField or SqlParameter or SqlValue))
+					    if (QueryHelper.UnwrapNullablity(sc.Expression) is not (SqlColumn or SqlField or SqlCteTableField or SqlParameter or SqlValue))
 						    return true;
 
 					    return false;
-				    }))
+					})
+				)
 				{
 					return false;
 				}
@@ -1622,35 +1999,22 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			var nullability = NullabilityContext.GetContext(parentQuery);
 
-			if (subQuery.HasOrderBy())
+			if (subQuery.HasOrderBy)
 			{
-				if (parentQuery.HasGroupBy() || parentQuery.IsDistinct() || QueryHelper.ContainsAggregationOrWindowFunction(parentQuery.Select))
+				if (parentQuery.HasGroupBy
+					|| parentQuery.IsDistinct
+					|| QueryHelper.ContainsAggregationOrWindowFunction(parentQuery.Select))
 				{
 					return false;
 				}
-			}
 
-			if (subQuery.HasOrderBy())
-			{
 				if (QueryHelper.IsAggregationQuery(parentQuery, out var needsOrderBy) && needsOrderBy)
 					return false;
-
-				if (parentQuery.IsDistinct())
-				{
-					// Check that all order by columns are in select list
-					foreach (var ob in subQuery.OrderBy.Items)
-					{
-						if (!parentQuery.Select.Columns.Any(c => QueryHelper.SameWithoutNullablity(c.Expression, ob.Expression)))
-						{
-							return false;
-						}
-					}
-				}
 			}
 
-			if (!subQuery.HasGroupBy() && QueryHelper.IsAggregationQuery(subQuery))
+			if (!subQuery.HasGroupBy && QueryHelper.IsAggregationQuery(subQuery))
 			{
-				if (parentQuery.HasWhere() || parentQuery.HasGroupBy() || parentQuery.HasHaving() || !parentQuery.IsSingleTableQueryWithoutJoins())
+				if (parentQuery.HasWhere || parentQuery.HasGroupBy || parentQuery.HasHaving || !parentQuery.IsSingleTableQueryWithoutJoins)
 					return false;
 			}
 
@@ -1675,7 +2039,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 						if (isWindowFunction || isAggregationFunction)
 						{
-							containsWindowFunction = containsWindowFunction    || isWindowFunction;
+							containsWindowFunction    = containsWindowFunction    || isWindowFunction;
 							containsAggregateFunction = containsAggregateFunction || isAggregationFunction;
 
 							sqlExpr.VisitAll(se =>
@@ -1703,7 +2067,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 				if (containsAggregateFunction)
 				{
-					if (subQuery.Select.HasModifier || subQuery.HasSetOperators || subQuery.HasGroupBy())
+					if (subQuery.Select.HasModifier || subQuery.HasSetOperators || subQuery.HasGroupBy)
 					{
 						// not allowed to move to parent if it has aggregates
 						return false;
@@ -1712,26 +2076,12 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 				if (containsWindowFunction)
 				{
-					if (subQuery.Select.HasModifier || subQuery.HasSetOperators || (parentQuery.HasWhere() && subQuery.HasWhere()) || subQuery.HasGroupBy())
+					if (subQuery.Select.HasModifier || subQuery.HasSetOperators || (parentQuery.HasWhere && subQuery.HasWhere)
+							|| (subQuery.HasGroupBy && parentQuery is not { Select.HasModifier: false, HasWhere: false, HasGroupBy: false, HasHaving: false, From.Tables: [{ Joins.Count: 0 }] }))
 					{
 						// not allowed to break window
 						return false;
 					}
-				}
-
-				if (parentQuery.HasGroupBy())
-				{
-					if (QueryHelper.UnwrapNullablity(parentColumn.Expression) is SqlColumn sc && sc.Parent == subQuery)
-					{
-						var expr = QueryHelper.UnwrapNullablity(sc.Expression);
-
-						// not allowed to move complex expressions for grouping
-						if (expr.ElementType is not (QueryElementType.SqlField or QueryElementType.Column or QueryElementType.SqlValue or QueryElementType.SqlParameter))
-						{
-							return false;
-						}
-					}
-
 				}
 			}
 
@@ -1741,9 +2091,14 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				if (QueryHelper.ContainsWindowFunction(column.Expression))
 				{
-					if (!(!parentQuery.Select.HasModifier && !parentQuery.HasWhere() && !parentQuery.HasGroupBy() && !parentQuery.HasHaving() && parentQuery.From.Tables is [{ Joins.Count: 0 }]))
+					// Window function in a subquery column can only be safely lifted into a
+					// plain single-table SELECT with no modifiers / WHERE / GROUP BY / HAVING.
+					if (parentQuery.Select.HasModifier
+						|| parentQuery.HasWhere
+						|| parentQuery.HasGroupBy
+						|| parentQuery.HasHaving
+						|| !parentQuery.IsSingleTableQueryWithoutJoins)
 					{
-						// not allowed to break query window
 						return false;
 					}
 				}
@@ -1761,7 +2116,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						return false;
 					}
 
-					if (!IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, column.Expression, ignoreWhere : true, inGrouping: subQuery.HasGroupBy()))
+					if (!IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, column.Expression, ignoreWhere: true, inGrouping: subQuery.HasGroupBy))
 					{
 						// Column expression is complex and Column has more than one reference
 						return false;
@@ -1769,7 +2124,8 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 				else
 				{
-					if (!QueryHelper.HasCteClauseReference(subQuery, _currentCteClause) && !IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, column.Expression, ignoreWhere : false, inGrouping: subQuery.HasGroupBy()))
+					if (!QueryHelper.HasCteClauseReference(subQuery, _currentCteClause)
+						&& !IsColumnExpressionAllowedToMoveUp(parentQuery, nullability, column, column.Expression, ignoreWhere: false, inGrouping: subQuery.HasGroupBy))
 					{
 						// Column expression is complex and Column has more than one reference
 						return false;
@@ -1799,13 +2155,13 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			HashSet<ISqlExpression>? aggregates = null;
 
-			if (subQuery.HasGroupBy() && parentQuery.HasGroupBy())
+			if (subQuery.HasGroupBy && parentQuery.HasGroupBy)
 				return false;
 
 			// Check possible moving Where to Having
 			//
 			{
-				if (parentQuery.HasWhere())
+				if (parentQuery.HasWhere)
 				{
 					var searchCondition = parentQuery.Where.SearchCondition;
 					if (searchCondition.Predicates is [SqlSearchCondition subCondition])
@@ -1840,7 +2196,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 					if (havingDetected?.Count != searchCondition.Predicates.Count)
 					{
-						if (!parentQuery.HasGroupBy() && subQuery.HasGroupBy())
+						if (!parentQuery.HasGroupBy && subQuery.HasGroupBy)
 						{
 							// everything should be moved to having
 							return false;
@@ -1854,11 +2210,8 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			// named sub-query cannot be removed
 			if (subQuery.QueryName != null
-			    // parent also has name
-			    && (parentQuery.QueryName != null
-			        // parent has other tables/sub-queries
-			        || parentQuery.From.Tables.Count > 1
-			        || parentQuery.From.Tables.Any(static t => t.Joins.Count > 0)))
+				// parent also has name, or has other tables/sub-queries
+				&& (parentQuery.QueryName != null || !parentQuery.IsSingleTableQueryWithoutJoins))
 			{
 				return false;
 			}
@@ -1871,27 +2224,27 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				if (subQuery.Select.HasModifier)
 					return false;
 
-				if (subQuery.HasOrderBy())
+				if (subQuery.HasOrderBy)
 				{
 					return false;
 				}
 			}
 
-			if (parentQuery.IsDistinct())
+			if (parentQuery.IsDistinct)
 			{
 				// Common check for Distincts
 
-				if (subQuery.HasHaving())
+				if (subQuery.HasHaving)
 					return false;
 
-				if (subQuery.HasOrderBy())
+				if (subQuery.HasOrderBy)
 				{
-					if (subQuery.IsLimited() || parentQuery.IsLimited())
+					if (subQuery.IsLimited || parentQuery.IsLimited)
 						return false;
 				}
 				else
 				{
-					if (subQuery.IsLimited())
+					if (subQuery.IsLimited)
 						return false;
 				}
 
@@ -1906,30 +2259,36 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 			}
 
-			if (subQuery.IsDistinct())
+			if (subQuery.IsDistinct)
 			{
-				if (parentQuery.HasOrderBy() && !parentQuery.OrderBy.Items.All(oi => oi.Expression is SqlColumn col && subQuery.Select.Columns.Contains(col)))
+				// A DISTINCT ON subquery must not be flattened into its parent: moving the modifier up would drop the
+				// ON list and break its ORDER BY dependency. Keep it as a nested derived table.
+				if (subQuery.Select.IsDistinctOn)
+					return false;
+
+				if (parentQuery.HasOrderBy && !parentQuery.OrderBy.Items.TrueForAll(oi => oi.Expression is SqlColumn col && subQuery.Select.Columns.Contains(col)))
 				{
 					return false;
 				}
 			}
 
-			if (subQuery.IsDistinct() != parentQuery.IsDistinct())
+			if (subQuery.IsDistinct != parentQuery.IsDistinct)
 			{
-				if (subQuery.IsDistinct())
+				if (subQuery.IsDistinct)
 				{
 					// Columns in parent query should match
 					//
-
-					if (!(parentQuery.Select.Columns.Count == 0 || subQuery.Select.Columns.All(sc =>
-						    parentQuery.Select.Columns.Any(pc => ReferenceEquals(QueryHelper.UnwrapNullablity(pc.Expression), sc)))))
+					if (parentQuery.Select.Columns.Count > 0)
 					{
-						return false;
-					}
+						if (parentQuery.Select.Columns.Count != subQuery.Select.Columns.Count)
+						{
+							return false;
+						}
 
-					if (parentQuery.Select.Columns.Count > 0 && parentQuery.Select.Columns.Count != subQuery.Select.Columns.Count)
-					{
-						return false;
+						if (!subQuery.Select.Columns.TrueForAll(sc => parentQuery.Select.Columns.Exists(pc => ReferenceEquals(QueryHelper.UnwrapNullablity(pc.Expression), sc))))
+						{
+							return false;
+						}
 					}
 				}
 				else
@@ -1947,33 +2306,32 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 					&& subQuery.Select.HasSomeModifiers(_providerFlags.IsUpdateSkipTakeSupported, _providerFlags.IsUpdateTakeSupported))
 					return false;
 
-				if (tableSource.Joins.Count > 0)
+				if (tableSource.HasJoins)
 					return false;
 				if (parentQuery.From.Tables.Count > 1)
 					return false;
 
-				if (parentQuery.HasOrderBy())
+				if (parentQuery.HasOrderBy)
 				{
-					if (subQuery.IsLimited())
+					if (subQuery.IsLimited)
 						return false;
 				}
 
-				if (parentQuery.HasWhere())
+				if (parentQuery.HasWhere)
 				{
 					if (subQuery.Select.TakeValue != null || subQuery.Select.SkipValue != null)
 						return false;
 				}
 
-				if (parentQuery.Select.Columns.Any(c => QueryHelper.ContainsAggregationOrWindowFunction(c.Expression)))
+				if (parentQuery.Select.Columns.Exists(c => QueryHelper.ContainsAggregationOrWindowFunction(c.Expression)))
 				{
 					return false;
 				}
 			}
 
-			if (subQuery.Select.HasModifier || subQuery.HasWhere())
+			if (subQuery.Select.HasModifier || subQuery.HasWhere)
 			{
-				if (tableSource.Joins.Any(j => j.JoinType == JoinType.Right || j.JoinType == JoinType.RightApply ||
-				                               j.JoinType == JoinType.Full  || j.JoinType == JoinType.FullApply))
+				if (tableSource.Joins.Exists(j => j.JoinType is JoinType.Right or JoinType.RightApply or JoinType.Full or JoinType.FullApply))
 				{
 					return false;
 				}
@@ -1983,7 +2341,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				if (QueryHelper.EnumerateJoins(subQuery).Any(j => j.JoinType != JoinType.Inner))
 				{
-					if (subQuery.Select.Columns.Any(c => IsInsideAggregate(parentQuery, c)))
+					if (subQuery.Select.Columns.Exists(c => IsInsideAggregate(parentQuery, c)))
 					{
 						if (QueryHelper.IsDependsOnOuterSources(subQuery))
 							return false;
@@ -1991,19 +2349,18 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 			}
 
-			if (!parentQuery.HasGroupBy() && subQuery.HasGroupBy())
+			if (!parentQuery.HasGroupBy && subQuery.HasGroupBy)
 			{
-				if (tableSource.Joins.Count > 0)
+				if (tableSource.HasJoins)
 					return false;
+
 				if (parentQuery.From.Tables.Count > 1)
 					return false;
 
-/*
-				throw new NotImplementedException();
+				//throw new NotImplementedException();
 
-				if (selectQuery.Select.Columns.All(c => QueryHelper.IsAggregationFunction(c.Expression)))
-					return false;
-*/
+				//if (selectQuery.Select.Columns.All(c => QueryHelper.IsAggregationFunction(c.Expression)))
+				//	return false;
 			}
 
 			if (subQuery.Select.TakeHints != null && parentQuery.Select.TakeValue != null)
@@ -2011,24 +2368,28 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			if (subQuery.HasSetOperators)
 			{
+				if (HasSetOperatorBarrier(parentQuery) || parentQuery.HasOrderBy)
+					return false;
+
 				if (parentQuery.HasSetOperators)
+					return false;
+
+				// A set-operation subquery can only be folded up into a trivial single-table
+				// parent: any join or extra FROM table would attach to the first union branch
+				// only (keeping a reference to the now-removed subquery column), silently
+				// dropping the filter from the other branches. See issue #5625.
+				if (!parentQuery.IsSingleTableQueryWithoutJoins)
 					return false;
 
 				if (parentQuery.Select.Columns.Count != subQuery.Select.Columns.Count)
 				{
-					if (subQuery.SetOperators.Any(so => so.Operation != SetOperation.UnionAll))
+					if (subQuery.SetOperators.Exists(so => so.Operation != SetOperation.UnionAll))
 						return false;
 				}
-
-				if (parentQuery.HasWhere() || parentQuery.HasHaving() || parentQuery.Select.HasModifier || parentQuery.HasOrderBy())
-					return false;
 
 				var operation = subQuery.SetOperators[0].Operation;
 
 				if (_currentSetOperator != null && _currentSetOperator.Operation != operation)
-					return false;
-
-				if (!subQuery.SetOperators.All(so => so.Operation == operation))
 					return false;
 			}
 
@@ -2069,7 +2430,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (subQuery.QueryName != null)
 				return false;
 
-			if (subQuery.HasGroupBy())
+			if (subQuery.HasGroupBy)
 				return false;
 
 			if (subQuery.Select.HasModifier)
@@ -2078,11 +2439,8 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (subQuery.HasSetOperators)
 				return false;
 
-			if (subQuery.HasGroupBy())
-				return false;
-
 			// Rare case when LEFT join is empty. We move search condition up. See TestDefaultExpression_22 test.
-			if (joinTable.JoinType == JoinType.Left && subQuery.Where.SearchCondition.IsFalse())
+			if (joinTable.JoinType == JoinType.Left && subQuery.Where.SearchCondition.IsFalse)
 			{
 				subQuery.Where.SearchCondition.Predicates.Clear();
 				joinTable.Condition.Predicates.Clear();
@@ -2092,11 +2450,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				return true;
 			}
 
-			var moveConditionToQuery = joinTable.JoinType == JoinType.Inner || joinTable.JoinType == JoinType.CrossApply;
+			var moveConditionToQuery = joinTable.JoinType is JoinType.Inner or JoinType.CrossApply;
 
 			if (joinTable.JoinType != JoinType.Inner)
 			{
-				if (subQuery.HasWhere())
+				if (subQuery.HasWhere)
 				{
 					if (joinTable.JoinType == JoinType.OuterApply)
 					{
@@ -2118,7 +2476,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 					}
 					else if (joinTable.JoinType == JoinType.Left)
 					{
-						if (joinTable.Condition.IsTrue())
+						if (joinTable.Condition.IsTrue)
 						{
 							// See `PostgreSQLExtensionsTests.GenerateSeries`
 							if (subQuery.From.Tables[0].Joins.Count > 0)
@@ -2149,7 +2507,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				foreach (var c in subQuery.Select.Columns)
 				{
 					var columnExpression = QueryHelper.UnwrapCast(c.Expression);
-					if (columnExpression is not (SqlField or SqlColumn))
+					if (columnExpression is not (SqlField or SqlCteTableField or SqlColumn or SqlRowExpression))
 					{
 						nullabilityContext ??= NullabilityContext.GetContext(subQuery);
 						if (!c.Expression.CanBeNullable(nullabilityContext))
@@ -2161,13 +2519,18 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 			}
 
-			if (subQuery.Select.Columns.Any(c => QueryHelper.ContainsAggregationOrWindowFunction(c.Expression)))
+			if (subQuery.Select.Columns.Exists(c => QueryHelper.ContainsAggregationOrWindowFunction(c.Expression)))
+				return false;
+
+			// #5413: only flatten a subquery-expression apply when its source is a single table whose joins
+			// are each limited to one record - otherwise flattening could lose the apply one-row bound.
+			if (joinTable.IsSubqueryExpression && !(subQuery.From.Tables is [{ Joins: var joins }] && joins.TrueForAll(QueryHelper.IsLimitedToOneRecord)))
 				return false;
 
 			// Actual modification starts from this point
 			//
 
-			if (subQuery.HasWhere())
+			if (subQuery.HasWhere)
 			{
 				if (moveConditionToQuery)
 				{
@@ -2181,7 +2544,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			if (selectQuery.Select.Columns.Count == 0)
 			{
-				foreach(var column in subQuery.Select.Columns)
+				foreach (var column in subQuery.Select.Columns)
 				{
 					selectQuery.Select.AddColumn(column.Expression);
 				}
@@ -2192,7 +2555,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				NotifyReplaced(column.Expression, column);
 			}
 
-			if (subQuery.HasOrderBy() && !QueryHelper.IsAggregationQuery(selectQuery))
+			if (subQuery.HasOrderBy && !QueryHelper.IsAggregationQuery(selectQuery))
 			{
 				ApplySubsequentOrder(selectQuery, subQuery);
 			}
@@ -2213,11 +2576,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		protected internal override IQueryElement VisitSqlFromClause(SqlFromClause element)
 		{
 			element = (SqlFromClause)base.VisitSqlFromClause(element);
-
-			if (_correcting != null)
 				return element;
-
-			return element;
 		}
 
 		bool OptimizeSubQueries(SelectQuery selectQuery, List<SelectQuery>? doNotRemoveQueries)
@@ -2248,42 +2607,39 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			for (var i = 0; i < selectQuery.From.Tables.Count; i++)
 			{
 				var tableSource = selectQuery.From.Tables[i];
-				if (tableSource.Source is SelectQuery { HasSetOperators: false, DoNotRemove: false } subQuery && subQuery.HasNoTables())
+				if (tableSource is { HasJoins: false, Source: SelectQuery { HasSetOperators: false, DoNotRemove: false, HasNoTables: true } subQuery })
 				{
-					if (tableSource.Joins.Count == 0)
+					if (selectQuery.From.Tables.Count == 1)
 					{
-						if (selectQuery.From.Tables.Count == 1)
+						if (selectQuery.HasGroupBy
+							|| selectQuery.HasHaving
+							|| selectQuery.HasOrderBy)
 						{
-							if (selectQuery.HasGroupBy()
-							    || selectQuery.HasHaving()
-							    || selectQuery.HasOrderBy())
-							{
-								continue;
-							}
+							continue;
 						}
-
-						if (subQuery.HasWhere())
-						{
-							if (!QueryHelper.IsAggregationQuery(selectQuery))
-								continue;
-						}
-
-						replaced = true;
-
-						foreach (var c in subQuery.Select.Columns)
-						{
-							NotifyReplaced(c.Expression, c);
-						}
-
-						if (subQuery.HasWhere())
-						{
-							selectQuery.Where.SearchCondition = QueryHelper.MergeConditions(selectQuery.Where.SearchCondition, subQuery.Where.SearchCondition);
-						}
-
-						selectQuery.From.Tables.RemoveAt(i);
-
-						--i; // repeat again
 					}
+
+					if (subQuery.HasWhere)
+					{
+						if (!QueryHelper.IsAggregationQuery(selectQuery))
+							continue;
+					}
+
+					replaced = true;
+
+					foreach (var c in subQuery.Select.Columns)
+					{
+						NotifyReplaced(c.Expression, c);
+					}
+
+					if (subQuery.HasWhere)
+					{
+						selectQuery.Where.SearchCondition = QueryHelper.MergeConditions(selectQuery.Where.SearchCondition, subQuery.Where.SearchCondition);
+					}
+
+					selectQuery.From.Tables.RemoveAt(i);
+
+					--i; // repeat again
 				}
 			}
 
@@ -2318,21 +2674,28 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				{
 					for (var index = 0; index < tableSource.Joins.Count; index++)
 					{
-						var join = tableSource.Joins[index];
-						if (join.JoinType == JoinType.Inner && join.Table.Joins.Count == 0 && join.Table.Source is SelectQuery joinQuery)
-						{
-							if (joinQuery.From.Tables.Count == 0)
+						if (
+							tableSource.Joins[index] is
 							{
-								replaced = true;
-
-								foreach (var c in joinQuery.Select.Columns)
+								JoinType: JoinType.Inner or JoinType.Cross or JoinType.Left,
+								Condition.IsTrue: true,
+								Table:
 								{
-									NotifyReplaced(c.Expression, c);
-								}
+									Joins.Count: 0,
+									Source: SelectQuery { From.Tables.Count: 0, HasSetOperators: false, Select.HasModifier: false, DoNotRemove: false, Where.SearchCondition.IsTrue: true } joinQuery,
+								},
+							} join
+						)
+						{
+							replaced = true;
 
-								tableSource.Joins.RemoveAt(index);
-								--index;
+							foreach (var c in joinQuery.Select.Columns)
+							{
+								NotifyReplaced(c.Expression, c);
 							}
+
+							tableSource.Joins.RemoveAt(index);
+							--index;
 						}
 					}
 				}
@@ -2359,16 +2722,16 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						var join = tableSource.Joins[j];
 
 						if (join.JoinType is (JoinType.Inner or JoinType.Left) && !join.Condition.IsOr && join.Condition.Predicates.Count != 0)
-							modified |= MoveJoinConditionsToWhere(root, tableSource, join, selectQuery.Where, NullabilityContext.GetContext(selectQuery));
+							modified |= MoveJoinConditionsToWhere(root, join, selectQuery.Where, NullabilityContext.GetContext(selectQuery));
 					}
 				}
 			}
 
 			return modified;
 
-			bool MoveJoinConditionsToWhere(SqlStatement root, SqlTableSource left, SqlJoinedTable join, SqlWhereClause where, NullabilityContext nullabilityContext)
+			bool MoveJoinConditionsToWhere(SqlStatement root, SqlJoinedTable join, SqlWhereClause where, NullabilityContext nullabilityContext)
 			{
-				var modified                   = false;
+				var moved                      = false;
 				var isLeft                     = join.JoinType == JoinType.Left;
 				List<ISqlTableSource>? sources = null;
 
@@ -2388,7 +2751,10 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						sources ??= QueryHelper.EnumerateAccessibleSources(join.Table).ToList();
 						move = !QueryHelper.IsDependsOnSources(predicate, sources);
 
-						if (!move && !QueryHelper.IsDependsOnSource(predicate, left))
+						// Push into the right derived table only when the predicate depends solely on the join's
+						// own subtree (sources); a predicate that also references the outer side is a genuine
+						// cross-input condition and must stay in ON.
+						if (!move && !QueryHelper.IsDependsOnOuterSources(predicate, currentSources: sources))
 						{
 							if (nestedWhereCond == null)
 							{
@@ -2396,7 +2762,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 								{
 									QueryHelper.WrapQuery(root, sq, true, doNotRemove: true);
 									nestedWhereCond = ((SelectQuery)join.Table.Source).Where.EnsureConjunction();
-									modified = true;
+									moved = true;
 								}
 								else if (join.Table.Source is SqlTable t)
 								{
@@ -2419,7 +2785,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 										_rootElement.Replace(toReplace, subQuery.Select);
 									}
 
-									modified = true;
+									moved = true;
 								}
 							}
 
@@ -2454,7 +2820,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 
 				// this could result in empty condition, but it is fine - user created unsupported query
-				return modified;
+				return moved;
 			}
 		}
 
@@ -2622,10 +2988,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				return expr switch
 				{
-					SqlColumn column   => column.Parent,
-					SqlField field     => field.Table,
-					ISqlTableSource ts => ts,
-					_                  => null,
+					SqlColumn column          => column.Parent,
+					SqlField field            => field.Table,
+					SqlCteTableField cteField => cteField.Table,
+					ISqlTableSource ts        => ts,
+					_                         => null,
 				};
 			}
 		}
@@ -2704,7 +3071,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			for (var index = 0; index < selectQuery.Select.Columns.Count; index++)
 			{
 				var c = selectQuery.Select.Columns[index];
-				for(var nextIndex = index + 1; nextIndex < selectQuery.Select.Columns.Count; nextIndex++)
+				for (var nextIndex = index + 1; nextIndex < selectQuery.Select.Columns.Count; nextIndex++)
 				{
 					var nc = selectQuery.Select.Columns[nextIndex];
 
@@ -2725,7 +3092,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		bool OptimizeJoins(SelectQuery selectQuery, ref List<SelectQuery>? doNotRemoveQueries)
 		{
-			var isModified     = false;
+			var isModified = false;
 
 			for (var i = selectQuery.From.Tables.Count - 1; i >= 0; i--)
 			{
@@ -2737,14 +3104,23 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 					if (join.JoinType is JoinType.CrossApply or JoinType.OuterApply or JoinType.FullApply or JoinType.RightApply)
 					{
-						if (OptimizeApplyJoin(join, doNotEmulate : true))
+						if (OptimizeApplyJoin(join, doNotEmulate: true))
 						{
 							isModified = true;
 						}
 					}
 
 					// First run
-					if (MoveSingleOuterJoinToSubQuery(selectQuery, join, ref doNotRemoveQueries, processMultiColumn : false, deduplicate : join.JoinType is JoinType.OuterApply && !_providerFlags.IsApplyJoinSupported, out var modified))
+					if (
+						MoveSingleOuterJoinToSubQuery(
+							selectQuery,
+							join,
+							ref doNotRemoveQueries,
+							processMultiColumn: false,
+							deduplicate: join.JoinType is JoinType.OuterApply && !_providerFlags.IsApplyJoinSupported,
+							out var modified
+						)
+					)
 					{
 						table.Joins.RemoveAt(index);
 
@@ -2756,18 +3132,18 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 					isModified = isModified || modified;
 
-					if (join.JoinType is JoinType.CrossApply or JoinType.OuterApply or JoinType.FullApply or JoinType.RightApply)
+					if (_isColumnsOptimized && join.JoinType is JoinType.CrossApply or JoinType.OuterApply or JoinType.FullApply or JoinType.RightApply)
 					{
-						if (OptimizeApplyJoin(join, doNotEmulate : false))
+						if (OptimizeApplyJoin(join, doNotEmulate: false))
 						{
 							isModified = true;
 						}
 					}
 
-					if (!_providerFlags.IsApplyJoinSupported && join.JoinType is JoinType.OuterApply || !_providerFlags.IsSupportsJoinWithoutCondition && join.Condition.IsTrue())
+					if (!_providerFlags.IsApplyJoinSupported && join.JoinType is JoinType.OuterApply || !_providerFlags.IsSupportsJoinWithoutCondition && join.Condition.IsTrue)
 					{
 						// last chance to remove apply join before finalizing query.
-						if (MoveSingleOuterJoinToSubQuery(selectQuery, join, ref doNotRemoveQueries, processMultiColumn : true, deduplicate : true, out modified))
+						if (MoveSingleOuterJoinToSubQuery(selectQuery, join, ref doNotRemoveQueries, processMultiColumn: _isColumnsOptimized, deduplicate: true, out modified))
 						{
 							table.Joins.RemoveAt(index);
 							OptimizeInnerQueries(selectQuery, doNotRemoveQueries);
@@ -2776,6 +3152,31 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 							--index;
 							continue;
+						}
+
+						// A conditionless INNER JOIN renders as `JOIN ON 1=1`, which providers with
+						// IsSupportsJoinWithoutCondition == false reject. Where the provider supports CROSS
+						// JOIN, express it as one (the validator accepts CROSS). INNER ON 1=1 is always
+						// equivalent to CROSS; LEFT ON 1=1 only when the joined source is guaranteed non-empty
+						// (an aggregate without GROUP BY, e.g. a scalar COUNT carrier, yields exactly one row).
+						// A HAVING clause breaks that guarantee — a no-GROUP BY aggregate with HAVING yields
+						// zero rows when the predicate fails, so the LEFT JOIN is not equivalent to CROSS.
+						if (join.Condition.IsTrue && _providerFlags.IsCrossJoinSupported
+							&& (join.JoinType == JoinType.Inner
+								|| (join is { JoinType: JoinType.Left, Table.Source: SelectQuery { HasGroupBy: false, HasHaving: false } aggSrc } && QueryHelper.IsAggregationQuery(aggSrc))))
+						{
+							join.JoinType = JoinType.Cross;
+
+							if (join.Table.Joins.Count > 0)
+							{
+								// CROSS JOIN can't carry the joined subquery's own joins; lift them to the parent level
+								for (var ij = 0; ij < join.Table.Joins.Count; ij++)
+									table.Joins.Insert(index + ij + 1, join.Table.Joins[ij]);
+
+								join.Table.Joins.Clear();
+							}
+
+							isModified = true;
 						}
 
 						isModified = isModified || modified;
@@ -2817,7 +3218,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			}
 		}
 
-			void CorrectEmptyInnerJoinsRecursive(SelectQuery selectQuery)
+		void CorrectEmptyInnerJoinsRecursive(SelectQuery selectQuery)
 		{
 			selectQuery.Visit(e =>
 			{
@@ -2836,7 +3237,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				for (var joinIndex = 0; joinIndex < table.Joins.Count; joinIndex++)
 				{
 					var join = table.Joins[joinIndex];
-					if (join.JoinType == JoinType.Inner && join.Condition.IsTrue())
+					if (join is { JoinType: JoinType.Inner, Condition.IsTrue: true })
 					{
 						if (_providerFlags.IsCrossJoinSupported
 							&& (table.Joins.Count > (_providerFlags.IsCrossJoinSyntaxRequired ? 0 : 1)
@@ -2876,16 +3277,63 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 			}
 
+			// Providers that require explicit CROSS JOIN syntax can't emit the comma (implicit
+			// cartesian) FROM list, so fold any extra top-level FROM tables into CROSS JOINs on the
+			// first table (e.g. YDB rejects `FROM a, b`).
+			if (_providerFlags.IsCrossJoinSyntaxRequired && selectQuery.From.Tables.Count > 1)
+			{
+				var mainTable = selectQuery.From.Tables[0];
+
+				while (selectQuery.From.Tables.Count > 1)
+				{
+					var crossTable = selectQuery.From.Tables[1];
+					selectQuery.From.Tables.RemoveAt(1);
+
+					mainTable.Joins.Add(new SqlJoinedTable(JoinType.Cross, crossTable, false));
+
+					// a folded table's own joins must follow its CROSS JOIN, flat on the main table
+					for (var ij = 0; ij < crossTable.Joins.Count; ij++)
+						mainTable.Joins.Add(crossTable.Joins[ij]);
+					crossTable.Joins.Clear();
+
+					isModified = true;
+				}
+			}
+
 			return isModified;
 		}
 
 		protected override ISqlExpression VisitSqlColumnExpression(SqlColumn column, ISqlExpression expression)
 		{
-			expression = base.VisitSqlColumnExpression(column, expression);
+			var saveIsExpression = _isExpression;
 
-			expression = QueryHelper.SimplifyColumnExpression(expression);
+			_isExpression = true;
+			expression = base.VisitSqlColumnExpression(column, expression);
+			_isExpression = saveIsExpression;
 
 			return expression;
+		}
+
+		protected internal override IQueryElement VisitSqlSearchCondition(SqlSearchCondition element)
+		{
+			var saveIsExpression = _isExpression;
+
+			_isExpression = true;
+			var result = base.VisitSqlSearchCondition(element);
+			_isExpression = saveIsExpression;
+
+			return result;
+		}
+
+		protected internal override IQueryElement VisitSqlSetExpression(SqlSetExpression element)
+		{
+			var saveIsExpression = _isExpression;
+
+			_isExpression = true;
+			var result = base.VisitSqlSetExpression(element);
+			_isExpression = saveIsExpression;
+
+			return result;
 		}
 
 		static bool IsLimitedToOneRecord(SelectQuery parentQuery, SelectQuery selectQuery, EvaluationContext context)
@@ -2908,7 +3356,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 					return true;
 			}
 
-			if (selectQuery.HasWhere())
+			if (selectQuery.HasWhere)
 			{
 				var keys = new List<IList<ISqlExpression>>();
 				QueryHelper.CollectUniqueKeys(selectQuery, true, keys);
@@ -2942,7 +3390,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 					}
 
 					// all keys should be matched
-					if (keys.Any(kl => kl.All(k => foundEquality.Contains(k))))
+					if (keys.Exists(kl => kl.All(k => foundEquality.Contains(k))))
 						return true;
 				}
 			}
@@ -3017,7 +3465,6 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		void MoveToSubQuery(SelectQuery query)
 		{
 			var subQuery = MoveTablesToSubQuery(query);
-			subQuery.DoNotRemove = true;
 		}
 
 		SelectQuery MoveTablesToSubQuery(SelectQuery query)
@@ -3029,36 +3476,39 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			query.Select.From.Tables.Clear();
 			_ = query.Select.From.Table(subQuery);
 
-			if (query.HasOrderBy())
+			if (query.HasOrderBy)
 			{
 				subQuery.OrderBy.Items.AddRange(query.OrderBy.Items);
 				query.OrderBy.Items.Clear();
 			}
 
-			if (query.HasGroupBy())
+			if (query.HasGroupBy)
 			{
 				subQuery.GroupBy.Items.AddRange(query.GroupBy.Items);
 				query.GroupBy.Items.Clear();
 			}
 
-			if (query.HasWhere())
+			if (query.HasWhere)
 			{
 				subQuery.Where.SearchCondition.Predicates.AddRange(query.Where.SearchCondition.Predicates);
 				subQuery.Where.SearchCondition.IsOr = query.Where.SearchCondition.IsOr;
 				query.Where.SearchCondition.Predicates.Clear();
 			}
 
-			if (query.HasHaving())
+			if (query.HasHaving)
 			{
 				subQuery.Having.SearchCondition.Predicates.AddRange(query.Having.SearchCondition.Predicates);
 				subQuery.Having.SearchCondition.IsOr = query.Having.SearchCondition.IsOr;
 				query.Having.SearchCondition.Predicates.Clear();
 			}
 
-			if (query.IsDistinct())
+			if (query.IsDistinct)
 			{
 				subQuery.Select.IsDistinct = true;
 				query.Select.IsDistinct    = false;
+				// move DISTINCT ON keys down with the modifier and clear them from the source query
+				subQuery.Select.DistinctOn = query.Select.DistinctOn;
+				query.Select.DistinctOn    = null;
 			}
 
 			_columnNestingCorrector.CorrectColumnNesting(query);
@@ -3070,22 +3520,24 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 		{
 			isModified = false;
 
-			if (!(join.JoinType == JoinType.OuterApply ||
-			      join.JoinType == JoinType.Left       ||
-			      join.JoinType == JoinType.CrossApply ||
-			      join.JoinType == JoinType.Inner
-				  ))
+			if (
+				join.JoinType is not (
+					JoinType.OuterApply or
+					JoinType.Left or
+					JoinType.CrossApply or
+					JoinType.Inner
+				)
+			)
 			{
 				return false;
 			}
 
-			if (join.Table.HasJoins())
+			if (join.Table.HasJoins)
 			{
 				return false;
 			}
 
-			var joinQuery       = join.Table.Source as SelectQuery;
-			if (joinQuery == null || joinQuery.Select.Columns.Count == 0)
+			if (join.Table.Source is not SelectQuery { HasNoColumns: false } joinQuery)
 			{
 				return false;
 			}
@@ -3107,7 +3559,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 			var evaluationContext = new EvaluationContext();
 
-			if (joinQuery.Select.Columns.Count > 1)
+			if (!joinQuery.IsSingleColumn)
 			{
 				if (!processMultiColumn)
 					return false;
@@ -3132,7 +3584,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			if (_updateTable != null && joinQuery.HasElement(_updateTable))
 				return false;
 
-			if (!joinQuery.HasNoTables())
+			if (!joinQuery.HasNoTables)
 			{
 				if (!SqlProviderHelper.IsValidQuery(joinQuery, parentQuery: parentQuery, fakeJoin: null, columnSubqueryLevel: 0, _providerFlags, out _))
 					return false;
@@ -3142,7 +3594,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				foreach (var column in joinQuery.Select.Columns)
 				{
-					if (!_movingComplexityVisitor.IsAllowedToMove(_providerFlags, column, MovingComplexityVisitor.TestMode.TestingSubqueryExpression, parentQuery, [joinQuery]))
+					if (!_movingComplexityVisitor.IsAllowedToMove(_providerFlags, column, MovingComplexityVisitor.TestMode.TestingSubqueryExpression, parentQuery, [joinQuery]) || !IsValidForOrderBy(parentQuery, joinQuery, true))
 					{
 						if (!deduplicate)
 							return false;
@@ -3158,7 +3610,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				}
 			}
 
-			if (joinQuery.Select.Columns.Count > 1 && joinQuery.Select.IsDistinct)
+			if (joinQuery.Select.Columns.Count > 1 && joinQuery.Select.IsDistinct && !joinQuery.Select.IsDistinctOn)
 			{
 				if (!SqlProviderHelper.IsValidQuery(joinQuery, parentQuery: parentQuery, fakeJoin: null, columnSubqueryLevel: 1, _providerFlags, out _))
 					return false;
@@ -3171,7 +3623,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			{
 				// where we can start analyzing that we can move join to subquery
 
-				var usageCount = CountUsage(parentQuery, testedColumn);
+				var usageCount = joinQuery.HasNoTables ? 1 : CountUsage(parentQuery, testedColumn);
 				var isUnique   = usageCount <= 1;
 
 				if (!isUnique && !deduplicate)
@@ -3183,12 +3635,13 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				{
 					if (join.JoinType == JoinType.Left)
 					{
-						return false;
+						if (_providerFlags.IsSupportsJoinWithoutCondition || !join.Condition.IsTrue)
+							return false;
 					}
 
 					if (_updateQuery != parentQuery)
 					{
-						if (SqlProviderHelper.IsValidQuery(joinQuery, parentQuery : parentQuery, fakeJoin : null, columnSubqueryLevel : 0, _providerFlags, out _))
+						if (SqlProviderHelper.IsValidQuery(joinQuery, parentQuery: parentQuery, fakeJoin: null, columnSubqueryLevel: 0, _providerFlags, out _))
 						{
 							MoveDuplicateUsageToSubQuery(parentQuery, ref doNotRemoveQueries);
 
@@ -3197,14 +3650,29 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						}
 					}
 				}
-
-				if (usageCount == 1 && !IsInSelectPart(parentQuery, testedColumn))
+				else
 				{
-					var moveToSubquery = IsInOrderByPart(parentQuery, testedColumn) && !_providerFlags.IsSubQueryOrderBySupported;
-					if (moveToSubquery)
+					if (!IsInSelectPart(parentQuery, testedColumn))
 					{
-						MoveToSubQuery(parentQuery);
-						isModified = true;
+						var moveToSubquery = IsInOrderByPart(parentQuery, testedColumn) && !_providerFlags.IsSubQueryOrderBySupported;
+						if (moveToSubquery)
+						{
+							MoveToSubQuery(parentQuery);
+							isModified = true;
+						}
+					}
+					else
+					{
+						// Handling Update case, when column used several times in Update statement. Check StringJoinAssociationSubqueryUpdate1 test for details.
+						if (_providerFlags.IsApplyJoinSupported && _updateQuery != null)
+						{
+							if (_updateQuery.Find(testedColumn, (tc, e) => e is SqlColumn col && col.Expression.AnyElement(ce => ReferenceEquals(ce, tc))) is SqlColumn found)
+							{
+								var updateUsage = CountUsage(_updateQuery, found);
+								if (updateUsage > 1)
+									return false;
+							}
+						}
 					}
 				}
 
@@ -3226,6 +3694,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						return false;
 					}
 				}
+
 			}
 
 			// moving whole join to subquery
@@ -3252,7 +3721,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 					queryToReplace.Select.Columns.Add(sourceColumn);
 				}
 
-				isModified        = true;
+				isModified = true;
 
 				NotifyReplaced(queryToReplace, testedColumn);
 			}
@@ -3302,20 +3771,26 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 
 		protected internal override IQueryElement VisitExistsPredicate(SqlPredicate.Exists predicate)
 		{
+			var saveInExpression = _isExpression;
+			_isExpression = false;
+
 			var result = base.VisitExistsPredicate(predicate);
+
+			_isExpression = saveInExpression;
 
 			if (!ReferenceEquals(result, predicate))
 				return Visit(predicate);
 
 			var sq = predicate.SubQuery;
 
-			// We can safely optimize out Distinct
-			if (sq.Select.IsDistinct)
+			// We can safely optimize out Distinct (but not DISTINCT ON — clearing only IsDistinct would leave the ON
+			// list dangling; EXISTS ignores distinctness/ordering anyway, so leaving it intact is harmless).
+			if (sq.Select.IsDistinct && !sq.Select.IsDistinctOn)
 			{
 				sq.Select.IsDistinct = false;
 			}
 
-			if (!sq.HasGroupBy() && !sq.HasSetOperators)
+			if (!sq.HasGroupBy && !sq.HasSetOperators)
 			{
 				// non aggregation columns can be removed
 				for (int i = sq.Select.Columns.Count - 1; i >= 0; i--)
@@ -3343,7 +3818,7 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			int              _foundCount;
 			int              _multiplier;
 			bool             _notAllowedScope;
-			TestMode             _testMode;
+			TestMode         _testMode;
 			bool             _isSubqueryInsideCondition;
 
 			[Flags]
@@ -3439,6 +3914,14 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 						return element;
 				}
 
+				if (!_sqlProviderFlags.IsOrderByAggregateSubquerySupported)
+				{
+					using (DoNotAllowScope(true))
+					{
+						return base.VisitSqlOrderByItem(element);
+					}
+				}
+
 				return base.VisitSqlOrderByItem(element);
 			}
 
@@ -3467,6 +3950,19 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				return element;
 			}
 
+			protected internal override IQueryElement VisitSqlConcatExpression(SqlConcatExpression element)
+			{
+				var saveIsSubqueryInsideCondition = _isSubqueryInsideCondition;
+
+				_isSubqueryInsideCondition = true;
+
+				base.VisitSqlConcatExpression(element);
+
+				_isSubqueryInsideCondition = saveIsSubqueryInsideCondition;
+
+				return element;
+			}
+
 			protected internal override IQueryElement VisitIsNullPredicate(SqlPredicate.IsNull predicate)
 			{
 				var saveIsSubqueryInsideCondition = _isSubqueryInsideCondition;
@@ -3481,9 +3977,9 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 			protected internal override IQueryElement VisitExprExprPredicate(SqlPredicate.ExprExpr predicate)
 			{
 				var saveIsSubqueryInsideCondition = _isSubqueryInsideCondition;
-				_isSubqueryInsideCondition = predicate.Expr1.IsNullValue() || predicate.Expr2.IsNullValue();
+				_isSubqueryInsideCondition = predicate.Expr1.IsNullValue || predicate.Expr2.IsNullValue;
 
-				base.VisitExprExprPredicate(predicate); 
+				base.VisitExprExprPredicate(predicate);
 
 				_isSubqueryInsideCondition = saveIsSubqueryInsideCondition;
 				return predicate;
@@ -3548,9 +4044,11 @@ namespace LinqToDB.Internal.SqlQuery.Visitors
 				if (ReferenceEquals(element, _predicate))
 					return base.Visit(element);
 
-				if (element is ISqlExpression sqlExpr and not SqlSearchCondition)
+				// SelectQuery is an ISqlExpression too (e.g. the operand of an IN/EXISTS subquery), but it must not be
+				// hoisted into a column - recurse into it so only the inner-only leaves get corrected.
+				if (element is ISqlExpression sqlExpr and not SqlSearchCondition and not SelectQuery)
 				{
-					if (QueryHelper.IsDependsOnSources(sqlExpr, _currentSources) && !QueryHelper.IsDependsOnOuterSources(sqlExpr, currentSources : _currentSources))
+					if (QueryHelper.IsDependsOnSources(sqlExpr, _currentSources) && !QueryHelper.IsDependsOnOuterSources(sqlExpr, currentSources: _currentSources))
 					{
 						if (sqlExpr is SqlColumn column && column.Parent == _forQuery)
 							return sqlExpr;

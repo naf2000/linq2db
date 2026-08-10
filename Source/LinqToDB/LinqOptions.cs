@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 
 using LinqToDB.Data;
@@ -11,15 +12,15 @@ namespace LinqToDB
 {
 	/// <param name="PreloadGroups">
 	/// Controls how group data for LINQ queries ended with GroupBy will be loaded:
-	/// - if <c>true</c> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
-	/// - if <c>false</c> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
-	/// Default value: <c>false</c>.
+	/// - if <see langword="true"/> - group data will be loaded together with main query, resulting in 1 + N queries, where N - number of groups;
+	/// - if <see langword="false"/> - group data will be loaded when you call enumerator for specific group <see cref="System.Linq.IGrouping{TKey, TElement}"/>.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="IgnoreEmptyUpdate">
 	/// Controls behavior of linq2db when there is no updateable fields in Update query:
-	/// - if <c>true</c> - query not executed and Update operation returns 0 as number of affected records;
-	/// - if <c>false</c> - <see cref="LinqToDBException"/> will be thrown.
-	/// Default value: <c>false</c>.
+	/// - if <see langword="true"/> - query not executed and Update operation returns 0 as number of affected records;
+	/// - if <see langword="false"/> - <see cref="LinqToDBException"/> will be thrown.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="GenerateExpressionTest">
 	/// Enables generation of test class for each LINQ query, executed while this option is enabled.
@@ -27,18 +28,18 @@ namespace LinqToDB
 	/// Test file will be placed to <c>linq2db</c> subfolder of temp folder and exact file path will be logged
 	/// to data connection tracing infrastructure.
 	/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="TraceMapperExpression">
 	/// Enables logging of generated mapping expression to data connection tracing infrastructure.
 	/// See <see cref="DataConnection.TraceSwitch"/> for more details.
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="ConcatenateOrderBy">
 	/// Controls behavior, when LINQ query chain contains multiple <see cref="System.Linq.Queryable.OrderBy{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> or <see cref="System.Linq.Queryable.OrderByDescending{TSource, TKey}(System.Linq.IQueryable{TSource}, Expression{Func{TSource, TKey}})"/> calls:
-	/// - if <c>true</c> - non-first OrderBy* call will be treated as ThenBy* call;
-	/// - if <c>false</c> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
-	/// Default value: <c>false</c>.
+	/// - if <see langword="true"/> - non-first OrderBy* call will be treated as ThenBy* call;
+	/// - if <see langword="false"/> - OrderBy* call will discard sort specifications, added by previous OrderBy* and ThenBy* calls.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="OptimizeJoins">
 	/// If enabled, linq2db will try to reduce number of generated SQL JOINs for LINQ query.
@@ -46,7 +47,7 @@ namespace LinqToDB
 	/// - removes duplicate joins by unique target table key;
 	/// - removes self-joins by unique key;
 	/// - removes left joins if joined table is not used in query.
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	/// <param name="CompareNulls">
 	/// <summary>
@@ -91,9 +92,9 @@ namespace LinqToDB
 	/// <param name="GuardGrouping">
 	/// <summary>
 	/// Controls behavior of LINQ query, which ends with GroupBy call.
-	/// - if <c>true</c> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
-	/// - if <c>false</c> - eager loading used.
-	/// Default value: <c>true</c>.
+	/// - if <see langword="true"/> - <seealso cref="LinqToDBException"/> will be thrown for such queries;
+	/// - if <see langword="false"/> - eager loading used.
+	/// Default value: <see langword="true"/>.
 	/// </summary>
 	/// <remarks>
 	/// <a href="https://github.com/linq2db/linq2db/issues/365">More details</a>.
@@ -108,7 +109,7 @@ namespace LinqToDB
 	/// <para />
 	/// - cache access synchronization could lead to bigger latencies than it saves.
 	/// <para />
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// <para />
 	/// It is not recommended to enable this option as it could lead to severe slowdown. Better approach will be
 	/// to use <see cref="NoLinqCache"/> scope around queries, that produce severe memory leaks you need to fix.
@@ -122,27 +123,27 @@ namespace LinqToDB
 	/// </param>
 	/// <param name="PreferApply">
 	/// Used to generate CROSS APPLY or OUTER APPLY if possible.
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	/// <param name="KeepDistinctOrdered">
 	/// Allows SQL generation to automatically transform
 	/// <code>SELECT DISTINCT value FROM Table ORDER BY date</code>
 	/// Into GROUP BY equivalent if syntax is not supported
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	/// <param name="ParameterizeTakeSkip">
 	/// Enables Take/Skip parameterization.
-	/// Default value: <c>true</c>.
+	/// Default value: <see langword="true"/>.
 	/// </param>
 	/// <param name="EnableContextSchemaEdit">
-	/// If <c>true</c>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
+	/// If <see langword="true"/>, user could add new mappings to context mapping schems (<see cref="IDataContext.MappingSchema"/>).
 	/// Otherwise, <see cref="LinqToDBException"/> will be generated on locked mapping schema edit attempt.
 	/// It is not recommended to enable this option as it has performance implications.
 	/// Proper approach is to create single <see cref="Mapping.MappingSchema"/> instance once, configure mappings for it and use this <see cref="Mapping.MappingSchema"/> instance for all context instances.
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	/// <param name="PreferExistsForScalar">
-	/// If <c>true</c>, EXISTS operator will be generated instead of IN operator for scalar values.
+	/// If <see langword="true"/>, EXISTS operator will be generated instead of IN operator for scalar values.
 	/// <code>
 	/// SELECT Value FROM MyEntity e WHERE EXISTS(SELECT * FROM MyEntity2 e2 WHERE e2.Value = e.Value)
 	/// </code>
@@ -150,31 +151,77 @@ namespace LinqToDB
 	/// <code>
 	/// SELECT Value FROM MyEntity e WHERE Value IN (SELECT Value FROM MyEntity2 e2)
 	/// </code>
-	/// Default value: <c>false</c>.
+	/// Default value: <see langword="false"/>.
+	/// </param>
+	/// <param name="PreferClientCalculation">
+	/// When enabled, computed expressions in the final projection (arithmetic, conditionals, unary operations, and
+	/// mapped members/methods that do not prefer server-side evaluation) are calculated on the client during
+	/// materialization instead of being translated into additional SQL columns. Real database columns,
+	/// already-built subqueries, and expressions that prefer or require server-side evaluation (for example,
+	/// members or methods mapped with <see cref="Sql.ExpressionAttribute.PreferServerSide"/> or
+	/// <see cref="Sql.ExpressionAttribute.ServerSideOnly"/>) are still translated to SQL.
+	/// Default value: <see langword="false"/>.
+	/// </param>
+	/// <param name="UpsertEmulationPolicy">
+	/// Controls what happens when an <c>Upsert</c> cannot be expressed as a native single-statement upsert
+	/// or <c>MERGE</c> for the target provider and would fall back to an emulated multi-statement
+	/// <c>SELECT → UPDATE → INSERT</c> sequence (the three statements run as independent commands — wrap the
+	/// call in a transaction if atomicity is required).
+	/// <list type="bullet">
+	///   <item><see cref="UpsertEmulationPolicy.Allow"/> (default) — perform the emulated fallback.</item>
+	///   <item><see cref="UpsertEmulationPolicy.Throw"/> — reject it with <see cref="LinqToDBException"/> at build time.</item>
+	/// </list>
+	/// </param>
+	/// <param name="DefaultEagerLoadingStrategy">
+	/// Specifies the default <see cref="EagerLoadingStrategy"/> used for all LoadWith/ThenLoad eager-loading
+	/// operations when no per-query strategy is set via <c>WithUnionLoadStrategy</c>, <c>WithKeyedLoadStrategy</c>, or <c>WithSeparateLoadStrategy</c>.
+	/// Default value: <see cref="EagerLoadingStrategy.Default"/>.
+	/// </param>
+	/// <param name="ImplicitCollectionLoading">
+	/// With <see cref="LinqToDB.ImplicitCollectionLoading.Throw"/>, a query that triggers an implicit eager load — a collection projected
+	/// in a <c>Select</c> without being explicitly requested — throws <see cref="LinqToDBException"/> at
+	/// build time; with <see cref="LinqToDB.ImplicitCollectionLoading.Allow"/> (the default) it is loaded as usual.
+	/// <para>
+	/// The guard is bypassed when the eager load is explicit: <c>LoadWith</c>/<c>ThenLoad</c> allows that
+	/// one collection (other unmarked collections in the same query still throw), while a root
+	/// <c>WithUnionLoadStrategy</c>/<c>WithKeyedLoadStrategy</c>/<c>WithSeparateLoadStrategy</c> marker opts
+	/// the whole query in.
+	/// </para>
+	/// </param>
+	/// <param name="OptimizeForSequentialAccess">
+	/// Enables mapping expression to be compatible with <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior.
+	/// Note that it doesn't switch linq2db to use <see cref="System.Data.CommandBehavior.SequentialAccess"/> behavior for
+	/// queries, so this optimization could be used for <see cref="System.Data.CommandBehavior.Default"/> too.
+	/// Default value: <see langword="false"/>.
 	/// </param>
 	public sealed record LinqOptions
 	(
 		// TODO: Remove in v7
 		[property: Obsolete("This API doesn't have effect anymore and will be removed in version 7"), EditorBrowsable(EditorBrowsableState.Never)]
-		bool         PreloadGroups           = false,
-		bool         IgnoreEmptyUpdate       = false,
-		bool         GenerateExpressionTest  = false,
-		bool         TraceMapperExpression   = false,
-		bool         ConcatenateOrderBy      = false,
-		bool         OptimizeJoins           = true,
-		CompareNulls CompareNulls            = CompareNulls.LikeClr,
-		bool         GuardGrouping           = true,
-		bool         DisableQueryCache       = false,
-		TimeSpan?    CacheSlidingExpiration  = default,
+		bool                      PreloadGroups               = false,
+		bool                      IgnoreEmptyUpdate           = false,
+		bool                      GenerateExpressionTest      = false,
+		bool                      TraceMapperExpression       = false,
+		bool                      ConcatenateOrderBy          = false,
+		bool                      OptimizeJoins               = true,
+		CompareNulls              CompareNulls                = CompareNulls.LikeClr,
+		bool                      GuardGrouping               = true,
+		bool                      DisableQueryCache           = false,
+		TimeSpan?                 CacheSlidingExpiration      = default,
 		// TODO: Remove in v7
 		[property: Obsolete("This API doesn't have effect anymore and will be removed in version 7"), EditorBrowsable(EditorBrowsableState.Never)]
-		bool         PreferApply             = true,
+		bool                      PreferApply                 = true,
 		// TODO: Remove in v7
 		[property: Obsolete("This API doesn't have effect anymore and will be removed in version 7"), EditorBrowsable(EditorBrowsableState.Never)]
-		bool         KeepDistinctOrdered     = true,
-		bool         ParameterizeTakeSkip    = true,
-		bool         EnableContextSchemaEdit = false,
-		bool         PreferExistsForScalar   = default
+		bool                      KeepDistinctOrdered         = true,
+		bool                      ParameterizeTakeSkip        = true,
+		bool                      EnableContextSchemaEdit     = false,
+		bool                      PreferExistsForScalar       = default,
+		bool                      PreferClientCalculation     = default,
+		UpsertEmulationPolicy     UpsertEmulationPolicy       = UpsertEmulationPolicy.Allow,
+		EagerLoadingStrategy      DefaultEagerLoadingStrategy = EagerLoadingStrategy.Default,
+		ImplicitCollectionLoading ImplicitCollectionLoading   = ImplicitCollectionLoading.Allow,
+		bool                      OptimizeForSequentialAccess = false
 		// If you add another parameter here, don't forget to update
 		// LinqOptions copy constructor and IConfigurationID.ConfigurationID.
 	)
@@ -184,20 +231,92 @@ namespace LinqToDB
 		{
 		}
 
+		// Not dead code: this user-declared copy constructor replaces the compiler-synthesized one that every
+		// `with` expression on this record invokes (see Configuration / DataOptionsExtensions). It intentionally
+		// omits the [Obsolete] no-effect parameters (PreloadGroups, PreferApply, KeepDistinctOrdered) so synthesized
+		// `with` paths don't reference obsolete members. Keep it in sync with new parameters (see note above).
 		LinqOptions(LinqOptions original)
 		{
-			IgnoreEmptyUpdate       = original.IgnoreEmptyUpdate;
-			GenerateExpressionTest  = original.GenerateExpressionTest;
-			TraceMapperExpression   = original.TraceMapperExpression;
-			ConcatenateOrderBy      = original.ConcatenateOrderBy;
-			OptimizeJoins           = original.OptimizeJoins;
-			CompareNulls            = original.CompareNulls;
-			GuardGrouping           = original.GuardGrouping;
-			DisableQueryCache       = original.DisableQueryCache;
-			CacheSlidingExpiration  = original.CacheSlidingExpiration;
-			ParameterizeTakeSkip    = original.ParameterizeTakeSkip;
-			EnableContextSchemaEdit = original.EnableContextSchemaEdit;
-			PreferExistsForScalar   = original.PreferExistsForScalar;
+			IgnoreEmptyUpdate           = original.IgnoreEmptyUpdate;
+			GenerateExpressionTest      = original.GenerateExpressionTest;
+			TraceMapperExpression       = original.TraceMapperExpression;
+			ConcatenateOrderBy          = original.ConcatenateOrderBy;
+			OptimizeJoins               = original.OptimizeJoins;
+			CompareNulls                = original.CompareNulls;
+			GuardGrouping               = original.GuardGrouping;
+			DisableQueryCache           = original.DisableQueryCache;
+			CacheSlidingExpiration      = original.CacheSlidingExpiration;
+			ParameterizeTakeSkip        = original.ParameterizeTakeSkip;
+			EnableContextSchemaEdit     = original.EnableContextSchemaEdit;
+			PreferExistsForScalar       = original.PreferExistsForScalar;
+			PreferClientCalculation     = original.PreferClientCalculation;
+			UpsertEmulationPolicy       = original.UpsertEmulationPolicy;
+			DefaultEagerLoadingStrategy = original.DefaultEagerLoadingStrategy;
+			ImplicitCollectionLoading   = original.ImplicitCollectionLoading;
+			OptimizeForSequentialAccess = original.OptimizeForSequentialAccess;
+		}
+
+		/// <summary>
+		/// Binary-compatibility overload of the record's positional constructor — mirrors the
+		/// public ctor signature as it was before <see cref="UpsertEmulationPolicy"/> and the later options were added,
+		/// so assemblies compiled against the previous linq2db release continue to load.
+		/// </summary>
+		// TODO: remove in v7 (binary-compat shim — drop together with the matching Deconstruct overload).
+		[EditorBrowsable(EditorBrowsableState.Never)]
+		public LinqOptions(
+			bool         preloadGroups,
+			bool         ignoreEmptyUpdate,
+			bool         generateExpressionTest,
+			bool         traceMapperExpression,
+			bool         concatenateOrderBy,
+			bool         optimizeJoins,
+			CompareNulls compareNulls,
+			bool         guardGrouping,
+			bool         disableQueryCache,
+			TimeSpan?    cacheSlidingExpiration,
+			bool         preferApply,
+			bool         keepDistinctOrdered,
+			bool         parameterizeTakeSkip,
+			bool         enableContextSchemaEdit,
+			bool         preferExistsForScalar)
+			: this(
+				preloadGroups, ignoreEmptyUpdate, generateExpressionTest, traceMapperExpression,
+				concatenateOrderBy, optimizeJoins, compareNulls, guardGrouping, disableQueryCache,
+				cacheSlidingExpiration, preferApply, keepDistinctOrdered, parameterizeTakeSkip,
+				enableContextSchemaEdit, preferExistsForScalar,
+				PreferClientCalculation: default, UpsertEmulationPolicy: UpsertEmulationPolicy.Allow, OptimizeForSequentialAccess: default)
+		{
+		}
+
+		/// <summary>
+		/// Binary-compatibility overload of the record's <c>Deconstruct</c> — mirrors the
+		/// method signature as it was before <see cref="UpsertEmulationPolicy"/> and the later options were added.
+		/// </summary>
+		// TODO: remove in v7 (binary-compat shim — drop together with the matching constructor overload).
+		[EditorBrowsable(EditorBrowsableState.Never)]
+		public void Deconstruct(
+			out bool         preloadGroups,
+			out bool         ignoreEmptyUpdate,
+			out bool         generateExpressionTest,
+			out bool         traceMapperExpression,
+			out bool         concatenateOrderBy,
+			out bool         optimizeJoins,
+			out CompareNulls compareNulls,
+			out bool         guardGrouping,
+			out bool         disableQueryCache,
+			out TimeSpan?    cacheSlidingExpiration,
+			out bool         preferApply,
+			out bool         keepDistinctOrdered,
+			out bool         parameterizeTakeSkip,
+			out bool         enableContextSchemaEdit,
+			out bool         preferExistsForScalar)
+		{
+			Deconstruct(
+				out preloadGroups, out ignoreEmptyUpdate, out generateExpressionTest, out traceMapperExpression,
+				out concatenateOrderBy, out optimizeJoins, out compareNulls, out guardGrouping, out disableQueryCache,
+				out cacheSlidingExpiration, out preferApply, out keepDistinctOrdered, out parameterizeTakeSkip,
+				out enableContextSchemaEdit, out preferExistsForScalar,
+				out _, out _, out _, out _, out _);
 		}
 
 		int? _configurationID;
@@ -221,6 +340,11 @@ namespace LinqToDB
 						.Add(ParameterizeTakeSkip)
 						.Add(EnableContextSchemaEdit)
 						.Add(PreferExistsForScalar)
+						.Add(PreferClientCalculation)
+						.Add((int)UpsertEmulationPolicy)
+						.Add((int)DefaultEagerLoadingStrategy)
+						.Add((int)ImplicitCollectionLoading)
+						.Add(OptimizeForSequentialAccess)
 						.CreateID();
 				}
 
@@ -255,7 +379,7 @@ namespace LinqToDB
 
 		#region IEquatable implementation
 
-		public bool Equals(LinqOptions? other)
+		public bool Equals([NotNullWhen(true)] LinqOptions? other)
 		{
 			if (ReferenceEquals(null, other)) return false;
 			if (ReferenceEquals(this, other)) return true;

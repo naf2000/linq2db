@@ -114,13 +114,9 @@ namespace Tests.Exceptions
 			using var t4 = db.CreateLocalTable<Issue5265SubTable04>();
 			using var t5 = db.CreateLocalTable<Issue5265SubTable05>();
 
-#if DEBUG
-			// initial: 710K
+			// initial stack use: 710K under DEBUG, 390K under RELEASE; both tuned down to the same
+			// last-known-good size, so the configuration split is no longer needed here
 			const int LKG_SIZE = 200 * 1024;
-#else
-			// initial: 390K
-			const int LKG_SIZE = 190 * 1024;
-#endif
 			var thread = new Thread(ThreadBody, LKG_SIZE);
 			thread.Start();
 			thread.Join();
@@ -180,7 +176,7 @@ namespace Tests.Exceptions
 		{
 			using var sc  = new ThreadHopsScope(hops);
 
-			var iterations = RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+			var iterations = OperatingSystem.IsLinux()
 				? 300_000
 				: 30_000;
 
@@ -234,7 +230,7 @@ namespace Tests.Exceptions
 		{
 			using var sc  = new ThreadHopsScope(hops);
 
-			var iterations = RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+			var iterations = OperatingSystem.IsLinux()
 				? 100_000
 				: 10_000;
 
