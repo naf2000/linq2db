@@ -140,7 +140,7 @@ namespace Tests.Linq
 			AssertQuery(query);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void static_readonly_access_readonly_members ([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -166,7 +166,7 @@ namespace Tests.Linq
 		}
 
 #if SUPPORTS_READONLY
-		[Test]
+		[Test, QueryCacheTest]
 		public void static_readonly_field_readonly_struct([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -191,7 +191,7 @@ namespace Tests.Linq
 			query2.GetCacheMissCount().ShouldBe(cacheMissCount);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void static_field_readonly_struct([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -217,7 +217,7 @@ namespace Tests.Linq
 		}
 #endif
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void static_field_readonly_members([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -242,7 +242,7 @@ namespace Tests.Linq
 			query2.GetCacheMissCount().ShouldBe(cacheMissCount);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void instance_readonly_members([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -295,10 +295,10 @@ namespace Tests.Linq
 		{
 			using var db = GetDataContext(context);
 
-			Assert.Throws<LinqToDBException> (() =>
+			Assert.That(() =>
 				{
 					db.SelectQuery(() => Sql.AsSql(1 as int?)).First();
-				}, "The LINQ expression '(1 as int?)' could not be converted to SQL.")
+				}, Throws.TypeOf<LinqToDBException>().With.Message.EqualTo("The LINQ expression '(1 as int?)' could not be converted to SQL."))
 			;
 		}
 

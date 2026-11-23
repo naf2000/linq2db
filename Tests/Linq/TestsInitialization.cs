@@ -2,18 +2,29 @@ using System;
 using System.Data.Common;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 
 using LinqToDB.Common;
 using LinqToDB.DataProvider.ClickHouse;
+using LinqToDB.Internal.DataProvider.DB2;
 using LinqToDB.Metrics;
 using LinqToDB.Tools.Activity;
 
 using NUnit.Framework;
+using NUnit.Framework.Internal;
+using NUnit.Framework.Internal.Execution;
+using NUnit.ParallelByResource;
 
 using Oracle.ManagedDataAccess.Client;
 
 using Tests;
+
+// Mark every fixture/test parallelizable so NUnit assigns the Parallel execution strategy
+// and dispatches each case. The actual concurrency is governed by ResourceLaneDispatcher
+// (installed in OneTimeSetUp): cases are routed to per-provider lanes so same-database tests
+// never overlap. Tests that mutate global state are excluded via [NonParallelizable].
+[assembly: Parallelizable(ParallelScope.All)]
 
 /// <summary>
 /// 1. Don't add namespace to this class! It's intentional
@@ -24,12 +35,11 @@ public class TestsInitialization
 {
 	static bool _doMetrics;
 
+	static ResourceLaneDispatcher? _dispatcher;
+
 	[OneTimeSetUp]
 	public void TestAssemblySetup()
 	{
-		// temporary, see SQLite.Runtime.props notes
-		Environment.SetEnvironmentVariable("PreLoadSQLite_BaseDirectory", Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "sds"));
-
 #if NET8_0_OR_GREATER
 		// this API is not available in NETFX, but for some reason it works if SDS test run first (which is true now)
 		IntPtr? handle = null;
@@ -72,24 +82,33 @@ public class TestsInitialization
 		// explicitly from the known clidriver path. See https://github.com/linq2db/linq2db/issues/5538
 		if (OperatingSystem.IsLinux())
 		{
-			IntPtr db2Handle = default;
-			System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(typeof(IBM.Data.Db2.DB2Connection).Assembly, (module, assembly, searchPath) =>
+			var providerAssembly = LinqToDB.Internal.Common.Tools.TryLoadAssembly(
+				DB2ProviderAdapter.AssemblyName, DB2ProviderAdapter.ProviderFactoryName);
+
+			providerAssembly ??= LinqToDB.Internal.Common.Tools.TryLoadAssembly(
+				DB2ProviderAdapter.AssemblyNameOld, DB2ProviderAdapter.ProviderFactoryName);
+
+			if (providerAssembly != null)
 			{
-				if (module == "libdb2.so")
+				IntPtr db2Handle = default;
+				System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(providerAssembly, (module, assembly, searchPath) =>
 				{
-					if (db2Handle == default)
+					if (module == "libdb2.so")
 					{
-						var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "clidriver", "lib", "libdb2.so");
-						if (File.Exists(path))
-							db2Handle = System.Runtime.InteropServices.NativeLibrary.Load(path);
+						if (db2Handle == default)
+						{
+							var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "clidriver", "lib", "libdb2.so");
+							if (File.Exists(path))
+								db2Handle = System.Runtime.InteropServices.NativeLibrary.Load(path);
+						}
+
+						if (db2Handle != default)
+							return db2Handle;
 					}
 
-					if (db2Handle != default)
-						return db2Handle;
-				}
-
-				return IntPtr.Zero;
-			});
+					return IntPtr.Zero;
+				});
+			}
 		}
 #else
 		// force load of SDS runtime first as there is no SetDllImportResolver API
@@ -122,6 +141,30 @@ public class TestsInitialization
 
 		// required for tests expectations
 		ClickHouseOptions.Default = ClickHouseOptions.Default with { UseStandardCompatibleAggregates = true };
+
+		// Cap the process-wide query cache to bound test-process memory. The default cap is 10000
+		// entries but a full run only produces ~1700 distinct queries, so it never trims and every
+		// distinct query is retained.
+		{
+			// The guard is the process's bitness, not its TFM. What runs out is the 32-bit address
+			// space: a full x86 run reaches ~1.8GB of the 2GB limit, and NUnit's end-of-run result
+			// serialization then needs one contiguous string it cannot get. The cap is worth ~45MB of
+			// that. netfx legs are capped regardless of bitness - the net462 x64 SQL Server EXTRAS leg
+			// runs out without it - so this is a union of the two conditions.
+			//
+			// 64-bit non-netfx legs keep the default: a small cap trims freshly-added, low-hit entries
+			// mid-test, which breaks the exact-miss-count cache tests, and there the address space is
+			// not the constraint. Overridable per leg via L2DB_TEST_QUERYCACHE.
+#if NETFRAMEWORK
+			var capByDefault = true;
+#else
+			var capByDefault = IntPtr.Size == 4;
+#endif
+			var qcMax = TestEnvironment.QueryCacheMax ?? (capByDefault ? 100 : (int?)null);
+
+			if (qcMax != null)
+				LinqToDB.Internal.Linq.QueryCache.Default.MaxEntriesOverride = qcMax;
+		}
 
 		// uncomment it to run tests with SeqentialAccess command behavior
 		//LinqToDB.Common.Configuration.OptimizeForSequentialAccess = true;
@@ -168,6 +211,47 @@ public class TestsInitialization
 		//custom initialization logic
 		CustomizationSupport.Init();
 
+		// Parallelize tests across database providers: route each provider's tests to a
+		// dedicated lane so the same database is never hit concurrently. Only swap when
+		// NUnit is actually running in parallel; a serial run keeps the original dispatcher.
+		// The cap bounds per-lane memory, not CPU, so 2xCPU is a proxy rather than a measurement: it happens
+		// to hold on the CI agents, but a many-core machine with modest memory gets the loosest cap exactly
+		// where it binds hardest. Set MaxParallelLanes explicitly there - see CONTRIBUTING.md.
+		var configuredLanes = TestConfiguration.MaxParallelLanes;
+		var maxLanes        = configuredLanes ?? (2 * Environment.ProcessorCount);
+		if (maxLanes < 1)
+			maxLanes = 1;
+
+		// Lane routing is traced only on request. A lane that hangs or misroutes is the one failure here
+		// that cannot be diagnosed after the fact, so the sink exists - but it is off by default because
+		// it logs per work item.
+		IParallelDiagnostics? diagnostics = TestEnvironment.ParallelDiagnostics
+			? new DelegateParallelDiagnostics(m => TestContext.Progress.WriteLine(m))
+			: null;
+
+		if (ResourceLaneDispatcherInstaller.TryInstall(new DatabaseLaneStrategy(), diagnostics, maxLanes, out var workers, out _dispatcher))
+		{
+			TestBase.ParallelExecutionEnabled = true;
+			// maxLanes is the concurrency ceiling, not nunitWorkers: resource tests run on the dispatcher's
+			// own lane threads rather than NUnit's workers, so the effective limit is the smaller of
+			// maxLanes and the number of distinct provider contexts in the run.
+			TestContext.Progress.WriteLine($"[parallel] installed ResourceLaneDispatcher (maxLanes={maxLanes} [{(configuredLanes.HasValue ? "from config" : "default 2xCPU")}] is the concurrency ceiling, cpus={Environment.ProcessorCount}, nunitWorkers={workers} dispatch only)");
+		}
+		else
+		{
+			TestContext.Progress.WriteLine($"[parallel] not installed; dispatcher is {TestExecutionContext.CurrentContext.Dispatcher?.GetType().Name ?? "null"}");
+		}
+
+		// A provider only gets a CreateDatabase case when it is in TestConfiguration.Providers, but the
+		// IncludeDataSources family selects test arguments from UserProviders alone - so the Northwind
+		// contexts and TestNoopProvider reach tests, and become resource-lane keys, with nothing that
+		// will ever signal their readiness latch. Left unmarked, each of those lanes blocks its first
+		// test for the full latch timeout while holding the dispatcher's read lock.
+		var createDatabaseProviders = TestConfiguration.GetCreateDatabaseProviders(Array.Empty<string>());
+
+		foreach (var provider in TestConfiguration.UserProviders.Except(createDatabaseProviders, StringComparer.OrdinalIgnoreCase))
+			CustomTestContext.MarkDatabaseReady(provider);
+
 		// Set up in-memory databases (SQLite/DuckDB) for any provider configured with an in-memory
 		// connection string (CI), before a_CreateData seeds them. No-op for the normal file-based setup.
 		SetupInMemoryDatabases();
@@ -213,17 +297,44 @@ public class TestsInitialization
 	// before (a run stopped at 36 minutes had reached 2096 of 7861 tests, holding 13891 handles and slowing
 	// from 112 to 2-6 tests a minute), and completes in 13 minutes with this, handle count flat.
 	//
+	// Access over OLE DB pays that same 0->1 transition, and one held connection pays it once the same way.
+	// Measured over the full Access suite against the ACE build CI installs (2010 redistributable, x86): the
+	// OLE-DB-only leg takes 332s with a connection held open against 1866s without one. It shows nothing in a
+	// leg that runs both transports, because they drive one shared ACE engine core - the ODBC anchor above
+	// already keeps it warm for both - so this anchor only earns its place once the leg is split per provider,
+	// which it now is (see the Access_ACE_* entries in Build/Azure/pipelines/templates/test-matrix.yml).
+	//
+	// It is not a crash guard, despite what the leg's history suggests. That leg also takes a hard 0xC0000005
+	// inside ACE from time to time; that is dotnet/runtime#46187, it long pre-dates either keep-alive, it still
+	// happens with both anchors held, and the pipeline absorbs it with retry: true. Ruled out as causes while
+	// chasing it, so they are not re-attempted: connection churn (the anchored build crashed just the same),
+	// the query shape (SELECT TOP 1 CVar(?) over a DBTYPE_GUID parameter - what BuildSqlParameterCastExpression
+	// emits, since Access has no CAST - survives isolated hammering, as do a bare parameter and a literal), and
+	// pooling (ACE registers OLEDB_SERVICES = 0xFFFFFFFE, every service except resource pooling, so there is
+	// nothing for OleDbConnection.ReleaseObjectPool to release).
+	//
 	// Registered with the same keep-alive list the in-memory databases use: not an in-memory database, but the
 	// same lifetime - opened before the first test, disposed at assembly teardown.
 	static void SetupAccessKeepAlive()
 	{
-		foreach (var name in new[] { "Access.Ace.Odbc", "Access.Jet.Odbc" })
+		// One anchor per transport, not per config. Within a transport both configs point at the same file
+		// through different engines - for ODBC {Microsoft Access Driver (*.mdb, *.accdb)} is ACE and the
+		// {...(*.mdb)} one is Jet, for OLE DB Microsoft.ACE.OLEDB.12.0 and Microsoft.Jet.OLEDB.4.0 likewise -
+		// and a connection string exists for both no matter which are enabled. Pinning that single file open
+		// through two Access engines for the whole run is not a supported combination, so the first config that
+		// opens wins and the rest of its group is left alone. Each transport still gets an anchor of its own:
+		// they share an engine core, so either one would warm both, but a split leg enables only one of them.
+		// LibRed gets no anchor: the 0->1 charge above is a property of the Microsoft drivers, and a managed
+		// in-process engine has neither the driver-manager close nor the handle leak.
+		KeepOneAccessConnectionAlive("ODBC",   new[] { "Access.Ace.Odbc",  "Access.Jet.Odbc"  }, static cs => new System.Data.Odbc.OdbcConnection(cs));
+		KeepOneAccessConnectionAlive("OLE DB", new[] { "Access.Ace.OleDb", "Access.Jet.OleDb" }, static cs => new System.Data.OleDb.OleDbConnection(cs));
+	}
+
+	static void KeepOneAccessConnectionAlive(string transport, string[] names, Func<string, DbConnection> create)
+	{
+		foreach (var name in names)
 		{
-			// Only what this run actually tests. Both configs point at the same TestData.ODBC.mdb but through
-			// different engines - {Microsoft Access Driver (*.mdb, *.accdb)} is ACE, the {...(*.mdb)} one is
-			// Jet - and a connection string exists for both no matter which are enabled. Opening the one that
-			// is not under test pinned that single file open through two Access engines for the whole run,
-			// which is not a supported combination.
+			// Only what this run actually tests.
 			if (!TestConfiguration.UserProviders.Contains(name))
 				continue;
 
@@ -236,7 +347,7 @@ public class TestsInitialization
 			if (string.IsNullOrWhiteSpace(cs))
 				continue;
 
-			var keep = new System.Data.Odbc.OdbcConnection(cs);
+			var keep = create(cs);
 
 			try
 			{
@@ -256,7 +367,9 @@ public class TestsInitialization
 			}
 
 			TestInMemoryDatabases.AddKeepAlive(keep);
-			TestContext.Progress.WriteLine($"[access-keepalive] holding a connection open for {name}");
+			TestContext.Progress.WriteLine($"[access-keepalive] holding an open {transport} connection for {name}");
+
+			return;
 		}
 	}
 
@@ -390,10 +503,49 @@ public class TestsInitialization
 	}
 #endif
 
+	// Pooled IBM connections left until process exit race the driver's exit handler against its pool timer (SIGSEGV, exit 139).
+	// InternalOperation1 is the driver's pool purge; reflection keeps legs without the driver from loading it.
+	static void PurgeDB2ConnectionPool()
+	{
+		var clientNamespace = DB2ProviderAdapter.ClientNamespace;
+		var driver          = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(static a => a.GetName().Name == DB2ProviderAdapter.AssemblyName);
+
+#if !NETFRAMEWORK
+		// IBM.Data.DB2.Core: the legacy .NET client DB2ProviderAdapter still falls back to.
+		if (driver == null)
+		{
+			clientNamespace = DB2ProviderAdapter.ClientNamespaceOld;
+			driver          = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(static a => a.GetName().Name == DB2ProviderAdapter.AssemblyNameOld);
+		}
+#endif
+
+		var purge  = driver?.GetType($"{clientNamespace}.DB2ConnPool")?.GetMethod("InternalOperation1", BindingFlags.Public | BindingFlags.Static, Type.EmptyTypes);
+
+		if (purge == null)
+			return;
+
+		try
+		{
+			purge.Invoke(null, null);
+			TestContext.Progress.WriteLine("[db2] connection pool purged");
+		}
+		catch (Exception ex)
+		{
+			// Best effort: a purge failure must not fail a run whose tests have all completed.
+			TestContext.Progress.WriteLine($"[db2] connection pool purge failed: {ex.InnerException?.Message ?? ex.Message}");
+		}
+	}
+
 	[OneTimeTearDown]
 	public void TestAssemblyTeardown()
 	{
+		// End the lanes and name any that is still running. Nothing else does: a lane stuck on an item
+		// would otherwise leave the run hanging with no indication of which one.
+		_dispatcher?.Shutdown(m => TestContext.Progress.WriteLine(m), TimeSpan.FromSeconds(10));
+
 		TestInMemoryDatabases.DisposeAll();
+
+		PurgeDB2ConnectionPool();
 
 		if (_doMetrics)
 		{

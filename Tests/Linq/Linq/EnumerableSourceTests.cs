@@ -16,7 +16,7 @@ namespace Tests.Linq
 	[TestFixture]
 	public partial class EnumerableSourceTests : TestBase
 	{
-		[Test]
+		[Test, QueryCacheTest]
 		public void ApplyJoinArray(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
@@ -53,9 +53,9 @@ namespace Tests.Linq
 			}
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var doe = "Doe";
 			using var db = GetDataContext(context);
@@ -79,9 +79,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray2(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var doe = "Doe";
 			using var db = GetDataContext(context);
@@ -105,9 +105,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray3(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var doe = "Doe";
 
@@ -138,9 +138,9 @@ namespace Tests.Linq
 			}
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray4(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var doe = "Doe";
 			var arr = new[] { "Janet", "Doe", "John", doe };
@@ -172,9 +172,9 @@ namespace Tests.Linq
 			}
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray5(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var doe = "Doe";
 
@@ -202,9 +202,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray6(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllPostgreSQL9)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllPostgreSQL9)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
 			var cacheMiss = db.Person.GetCacheMissCount();
@@ -227,7 +227,7 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinArray6Postgres([IncludeDataSources(TestProvName.AllPostgreSQL9, TestProvName.AllClickHouse)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -251,7 +251,7 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void ApplyJoinAnonymousClassArray(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
@@ -288,7 +288,7 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void ApplyJoinAnonymousClassArray2(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
@@ -325,7 +325,7 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void ApplyJoinClassArray(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
@@ -362,7 +362,7 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void OuterApplyJoinClassArray(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
@@ -400,9 +400,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinClassArray(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
 			var cacheMiss = db.Person.GetCacheMissCount();
@@ -427,9 +427,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinAnonymousClassRecords(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
 			var cacheMiss = db.Person.GetCacheMissCount();
@@ -454,9 +454,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinClassRecords(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
 			var cacheMiss = db.Person.GetCacheMissCount();
@@ -484,9 +484,9 @@ namespace Tests.Linq
 			AreEqual(expected, result);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void InnerJoinClassRecordsCache(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -528,9 +528,9 @@ namespace Tests.Linq
 			result2.Count.ShouldNotBe(result1.Count);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void Projection(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -548,9 +548,9 @@ namespace Tests.Linq
 				db.Person.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void NestingProperties(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
 			[Values(1, 2)]                                                                    int    iteration)
 		{
 			using var db = GetDataContext(context);
@@ -572,7 +572,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void ExpressionProjection(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -622,7 +622,7 @@ namespace Tests.Linq
 					return true;
 				}
 
-				if (obj.GetType() != GetType())
+				if (obj.GetType() != typeof(TableToInsert))
 				{
 					return false;
 				}
@@ -636,8 +636,8 @@ namespace Tests.Linq
 			}
 		}
 
-		[Test]
-		public void InsertTest([DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+		[Test, QueryCacheTest]
+		public void InsertTest([DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
 			using var table = db.CreateLocalTable<TableToInsert>();
@@ -666,11 +666,11 @@ namespace Tests.Linq
 				table.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void UpdateTest(
 			[DataSources(
-				TestProvName.AllAccess,
+				TestProvName.AllNativeAccess,
 				TestProvName.AllClickHouse,
 				ProviderName.DB2,
 				TestProvName.AllSybase,
@@ -709,9 +709,9 @@ namespace Tests.Linq
 		}
 
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
-		[Test]
+		[Test, QueryCacheTest]
 		public void DeleteTest(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix, TestProvName.AllClickHouse)] string context,
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix, TestProvName.AllClickHouse)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			var records = new TableToInsert[]
@@ -741,7 +741,7 @@ namespace Tests.Linq
 				table.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void CTETest([IncludeDataSources(TestProvName.AllSQLite)] string context, [Values(1, 2)] int iteration)
 		{
 			var records = new TableToInsert[]
@@ -767,7 +767,7 @@ namespace Tests.Linq
 				table.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void EmptyValues([DataSources(TestProvName.AllClickHouse, TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var records = Array.Empty<TableToInsert>();
@@ -806,8 +806,8 @@ namespace Tests.Linq
 		}
 
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
-		[Test]
-		public void SubQuery([DataSources(TestProvName.AllClickHouse, TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
+		[Test, QueryCacheTest]
+		public void SubQuery([DataSources(TestProvName.AllClickHouse, TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
 			var records = new TableToInsert[]
 			{
@@ -832,7 +832,7 @@ namespace Tests.Linq
 				table.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		public void EmptySubQuery([DataSources(TestProvName.AllClickHouse, TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context, [Values(1, 2)] int iteration)
 		{
@@ -854,10 +854,10 @@ namespace Tests.Linq
 		}
 
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
-		[Test]
+		[Test, QueryCacheTest]
 		public void StringSubQuery(
 			[DataSources(
-				TestProvName.AllAccess,
+				TestProvName.AllNativeAccess,
 				TestProvName.AllClickHouse,
 				ProviderName.DB2,
 				TestProvName.AllSybase,
@@ -897,7 +897,7 @@ namespace Tests.Linq
 
 		[ThrowsRequiresCorrelatedSubquery(simple: true)]
 		[Test]
-		public void StaticEnumerable([DataSources(TestProvName.AllClickHouse, TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context)
+		public void StaticEnumerable([DataSources(TestProvName.AllClickHouse, TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllSybase, TestProvName.AllSybase, TestProvName.AllInformix)] string context)
 		{
 			using var db = GetDataContext(context);
 			var query = db.Person.Where(p => IdValues.Any(v => v == p.ID));
@@ -913,7 +913,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void NullConstantProjection(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllSybase,
 				TestProvName.AllSybase, TestProvName.AllInformix)]
 			string context, [Values(1, 2)] int iteration)
 		{
@@ -935,7 +935,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void ConstantProjection(
-			[DataSources(TestProvName.AllAccess, ProviderName.DB2, TestProvName.AllSybase,
+			[DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllSybase,
 				TestProvName.AllSybase, TestProvName.AllInformix)]
 			string context, [Values(1, 2)] int iteration)
 		{
@@ -957,7 +957,7 @@ namespace Tests.Linq
 
 #if NET8_0_OR_GREATER
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/3665")]
-		public void Issue3665Test1([DataSources(TestProvName.AllAccess)] string context)
+		public void Issue3665Test1([DataSources(TestProvName.AllNativeAccess)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -972,7 +972,7 @@ namespace Tests.Linq
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/3665")]
-		public void Issue3665Test2([DataSources(TestProvName.AllAccess)] string context)
+		public void Issue3665Test2([DataSources(TestProvName.AllNativeAccess)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -991,7 +991,7 @@ namespace Tests.Linq
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/3665")]
-		public void Issue3665Test3([DataSources(TestProvName.AllAccess)] string context)
+		public void Issue3665Test3([DataSources(TestProvName.AllNativeAccess)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -1006,7 +1006,7 @@ namespace Tests.Linq
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/3665")]
-		public void Issue3665Test4([DataSources(TestProvName.AllAccess)] string context)
+		public void Issue3665Test4([DataSources(TestProvName.AllNativeAccess)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -1019,7 +1019,7 @@ namespace Tests.Linq
 		}
 
 		[Test(Description = "https://github.com/linq2db/linq2db/issues/3665")]
-		public void Issue3665Test5([DataSources(TestProvName.AllAccess)] string context)
+		public void Issue3665Test5([DataSources(TestProvName.AllNativeAccess)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -1031,5 +1031,33 @@ namespace Tests.Linq
 			AssertQuery(query);
 		}
 #endif
+
+		sealed class NullableRow
+		{
+			public int     Id    { get; set; }
+			public int?    Value { get; set; }
+			public string? Name  { get; set; }
+		}
+
+		// a NULL in the first row is what a VALUES source takes its column type from on some engines
+		[Test]
+		public void NullInFirstRow([DataSources(TestProvName.AllNativeAccess, ProviderName.DB2, TestProvName.AllInformix)] string context)
+		{
+			NullableRow[] rows =
+			[
+				new() { Id = 1, Value = null, Name = "a"  },
+				new() { Id = 2, Value = 2,    Name = null },
+			];
+
+			using var db = GetDataContext(context);
+
+			var query =
+				from p in db.Person
+				join r in rows on p.ID equals r.Id
+				orderby r.Id
+				select new { r.Id, r.Value, r.Name };
+
+			AssertQuery(query);
+		}
 	}
 }

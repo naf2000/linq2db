@@ -37,7 +37,7 @@ namespace Tests.Linq
 			TestProvName.AllSqlServer2019Minus + ","
 			+ ProviderName.SqlCe              + ","
 			+ TestProvName.AllSybase          + ","
-			+ TestProvName.AllAccess          + ","
+			+ TestProvName.AllNativeAccess    + ","
 			+ TestProvName.AllFirebird        + ","   // TRIM(LEADING/TRAILING chars FROM val) is substring, not set; no native regex
 			+ TestProvName.AllMySql57;                // no REGEXP_REPLACE (added in MySQL 8.0); same substring-vs-set issue
 
@@ -51,7 +51,8 @@ namespace Tests.Linq
 			+ TestProvName.AllDB2              + ","
 			+ TestProvName.AllInformix         + ","
 			+ TestProvName.AllSqlServer2022Plus + ","
-			+ TestProvName.AllClickHouse;
+			+ TestProvName.AllClickHouse       + ","
+			+ TestProvName.AllAccessLibRed;
 
 		#region Result-equivalence tests with forced translation
 
@@ -369,7 +370,7 @@ namespace Tests.Linq
 		// different chars value is safe — asserting a miss there would lock in
 		// avoidable cache churn.
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void TrimStartCharsCacheTest([DataSources] string context, [Values(1, 2)] int iteration)
 		{
 			using var db    = GetDataContext(context);
@@ -391,7 +392,7 @@ namespace Tests.Linq
 			}
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void TrimEndCharsCacheTest([DataSources] string context, [Values(1, 2)] int iteration)
 		{
 			using var db    = GetDataContext(context);
@@ -416,7 +417,7 @@ namespace Tests.Linq
 		// stored type and accessor type must agree, otherwise the cache compare always
 		// returns false and trim-with-chars queries miss cache on every execution.
 		// Re-executing the same query must hit the cache.
-		[Test]
+		[Test, QueryCacheTest]
 		public void TrimEndCharsCache_HitsOnSameContent([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -436,7 +437,7 @@ namespace Tests.Linq
 		// display-class type and same field layout, so structural compare matches.
 		// Sorted-string cache key gives set semantics, so a reordered chars argument
 		// must still hit the cache.
-		[Test]
+		[Test, QueryCacheTest]
 		public void TrimEndCharsCache_LocalFunctionWithReorderedCharsHits([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);
@@ -461,7 +462,7 @@ namespace Tests.Linq
 		// providers the translator returns null and the trim runs client-side, where
 		// the closure-captured chars is parameter-bound and the cache reuses the same
 		// plan across mutations (no stale SQL to worry about).
-		[Test]
+		[Test, QueryCacheTest]
 		public void TrimEndCharsCache_MutationMissesCache([DataSources] string context)
 		{
 			using var db    = GetDataContext(context);

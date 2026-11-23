@@ -30,7 +30,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Parameterize_AllParameters(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -50,7 +50,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Inline_AllInlined(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -69,7 +69,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Parameterize_ExceptId_InlinesId(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -93,7 +93,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Inline_ExceptData_ParameterisesData(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -116,9 +116,9 @@ namespace Tests.Linq
 			sql.ShouldNotContain("'Data 7778'");
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_Parameterize_CacheStable_AcrossDataChanges(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -141,9 +141,9 @@ namespace Tests.Linq
 			secondList[1].Id.ShouldBe(101);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_Parameterize_CacheHit_AcrossIterations(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context,
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -161,9 +161,9 @@ namespace Tests.Linq
 				query.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_Inline_CacheHit_AcrossIterations(
-			[DataSources(TestProvName.AllAccess)] string context,
+			[DataSources(TestProvName.AllNativeAccess)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -182,9 +182,9 @@ namespace Tests.Linq
 				query.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_Parameterize_ExceptId_CacheHit_AcrossIterations(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context,
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -204,7 +204,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Parameterize_ScalarIntList(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -222,7 +222,7 @@ namespace Tests.Linq
 
 		[Test]
 		public void AsQueryable_Parameterize_InlineArray(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context)
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context)
 		{
 			using var db = GetDataContext(context);
 
@@ -265,9 +265,9 @@ namespace Tests.Linq
 			act.ShouldThrow<LinqToDBException>().Message.ShouldContain("AsQueryable configure");
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_JoinPerson_CacheHit_AcrossIterations(
-			[DataSources(TestProvName.AllAccess, TestProvName.AllClickHouse)] string context,
+			[DataSources(TestProvName.AllNativeAccess, TestProvName.AllClickHouse)] string context,
 			[Values(1, 2)] int iteration)
 		{
 			using var db = GetDataContext(context);
@@ -288,7 +288,7 @@ namespace Tests.Linq
 				query.GetCacheMissCount().ShouldBe(cacheMiss);
 		}
 
-		[Test]
+		[Test, QueryCacheTest]
 		public void AsQueryable_CrossApply_CacheHit_AcrossIterations(
 			[IncludeDataSources(
 				TestProvName.AllSqlServer2008Plus,
